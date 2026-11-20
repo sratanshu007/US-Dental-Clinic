@@ -16,7 +16,7 @@ services:
     runtime: node
     plan: free
     rootDir: api
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /health
     envVars:
@@ -43,17 +43,17 @@ services:
       - key: DRY_RUN
         value: "true"
       - key: ADMIN_EMAIL
-        value: admin@deificdigital.com
+        sync: false
       - key: ADMIN_PASSWORD
-        value: ChangeMe-Admin-2026
+        sync: false
       - key: OWNER_EMAIL
-        value: owner@demo-dental.com
+        sync: false
       - key: OWNER_PASSWORD
-        value: ChangeMe-Owner-2026
+        sync: false
       - key: CLINIC_NAME
-        value: Demo Family Dental
+        sync: false
       - key: CLINIC_PHONE
-        value: "+12105550100"
+        sync: false
 
   # ----------------------------------------------------
   # 2. Web Dashboard (Next.js 15)
@@ -63,7 +63,7 @@ services:
     runtime: node
     plan: free
     rootDir: web
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /login
     envVars:
@@ -75,9 +75,15 @@ services:
           name: dental-api
           property: host
       - key: NEXT_PUBLIC_LOGIN_EMAIL
-        value: owner@demo-dental.com
+        fromService:
+          type: web
+          name: dental-api
+          envVarKey: OWNER_EMAIL
       - key: NEXT_PUBLIC_LOGIN_PASSWORD
-        value: ChangeMe-Owner-2026
+        fromService:
+          type: web
+          name: dental-api
+          envVarKey: OWNER_PASSWORD
 
   # ----------------------------------------------------
   # 3. Voice Agent (FastAPI + Pipecat AI)
