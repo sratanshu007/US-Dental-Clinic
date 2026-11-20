@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Clinic AI Desk",
+    "slug": "clinic-ai-desk",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.deificdigital.clinicaidesk"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.deificdigital.clinicaidesk"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "clinicaidesk",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#0f766e",
+          "defaultChannel": "default"
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "http://192.168.1.33:4000",
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
+  }
+}
