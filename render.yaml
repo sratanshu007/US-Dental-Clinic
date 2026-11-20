@@ -70,10 +70,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: dental-api
-          property: host
+        value: https://dental-api-7h2u.onrender.com
       - key: NEXT_PUBLIC_LOGIN_EMAIL
         fromService:
           type: web

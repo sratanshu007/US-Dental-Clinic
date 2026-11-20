@@ -9,16 +9,16 @@ export function getApiUrl(): string {
     if (custom) return custom.replace(/\/$/, "");
 
     const env = process.env.NEXT_PUBLIC_API_URL;
-    if (window.location.protocol === "https:" && (!env || env.includes("localhost") || env.includes("127.0.0.1"))) {
-      const host = window.location.hostname;
-      if (host.includes(".onrender.com")) {
-        const apiHost = host.replace("dental-web", "dental-api").replace("-web", "-api");
-        return `https://${apiHost}`;
-      }
+    if (env && !env.includes("localhost") && !env.includes("127.0.0.1")) {
+      return env.startsWith("http") ? env.replace(/\/$/, "") : `https://${env}`.replace(/\/$/, "");
+    }
+
+    if (window.location.protocol === "https:") {
+      return "https://dental-api-7h2u.onrender.com";
     }
   }
 
-  let u = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  let u = process.env.NEXT_PUBLIC_API_URL || "https://dental-api-7h2u.onrender.com";
   if (u && !u.startsWith("http://") && !u.startsWith("https://")) {
     u = `https://${u}`;
   }
