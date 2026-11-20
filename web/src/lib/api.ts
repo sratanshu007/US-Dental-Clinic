@@ -13,28 +13,24 @@ export function sanitizeApiUrl(raw?: string | null): string {
   u = u.replace(/\/$/, "");
   // If user entered e.g. https://dental-api-7h2u without domain dot
   const withoutProto = u.replace(/^https?:\/\//, "");
-  if (!withoutProto.includes(".")) {
+  if (!withoutProto.includes(".") && !withoutProto.includes("localhost") && !withoutProto.includes(":")) {
     u = `${u}.onrender.com`;
   }
   return u;
 }
 
 export function getApiUrl(): string {
-  let u = "";
-
-  // 1. Check user override in browser storage
+  // Purge any stale legacy localStorage override
   if (typeof window !== "undefined") {
-    const custom = window.localStorage?.getItem("dai.api_url");
-    if (custom && custom.trim()) {
-      u = sanitizeApiUrl(custom);
-      window.localStorage?.setItem("dai.api_url", u);
-      return u;
+    try {
+      window.localStorage?.removeItem("dai.api_url");
+    } catch {
+      /* ignore */
     }
   }
 
-  // 2. Strictly read from environment variable (no hardcoded fallback)
-  u = sanitizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
-  return u;
+  // Strictly read from environment variable
+  return sanitizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
 }
 
 export const API_URL = getApiUrl();
@@ -102,7 +98,8 @@ async function tryRefresh(): Promise<boolean> {
   if (!rt) return false;
   refreshing ??= (async () => {
     try {
-      const r = await fetch(`${API_URL}/auth/refresh`, {
+      const base = getApiUrl();
+      const r = await fetch(`${base}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: rt }),
@@ -149,8 +146,9 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
     return data as T;
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
-    throw new Error(err.message === "Failed to fetch"
-      ? `Cannot connect to API server (${base}). Server may be waking up or check API URL.`
+    const isFetchFailure = err.message === "Failed to fetch" || err.message === "Load failed" || err.name === "TypeError";
+    throw new Error(isFetchFailure
+      ? `Cannot connect to API server (${base || "not configured"}). Server may be waking up or check API URL.`
       : (err.message ?? "Network error"));
   }
 }

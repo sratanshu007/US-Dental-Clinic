@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { createApp } from "../src/app";
+import { config } from "../src/config";
 import { db, pool, schema } from "../src/db";
 import { totpCode } from "../src/lib/crypto";
 import { dailyReports, dispatchOutbound, sendReminders } from "../src/jobs";
@@ -295,8 +296,8 @@ test("audit log records PHI access", async () => {
 });
 
 test("super admin can create a clinic", async () => {
-  const adminEmail = process.env.ADMIN_EMAIL ?? "admin@deificdigital.com";
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "ChangeMe-Admin-2026";
+  const adminEmail = config.adminEmail;
+  const adminPassword = config.adminPassword;
   const l = await call("POST", "/auth/login", { email: adminEmail, password: adminPassword });
   token = l.json.accessToken;
   const num = `+1512555${String(Math.floor(Math.random() * 9000) + 1000)}`;
