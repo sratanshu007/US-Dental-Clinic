@@ -9,8 +9,8 @@ function LoginForm() {
   const params = useSearchParams();
 
   // Read login credentials dynamically from environment (.env.local)
-  const envEmail = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? process.env.NEXT_PUBLIC_DEFAULT_EMAIL ?? "";
-  const envPassword = process.env.NEXT_PUBLIC_LOGIN_PASSWORD ?? process.env.NEXT_PUBLIC_DEFAULT_PASSWORD ?? "";
+  const envEmail = process.env.NEXT_PUBLIC_LOGIN_EMAIL || process.env.NEXT_PUBLIC_DEFAULT_EMAIL || "owner@demo-dental.com";
+  const envPassword = process.env.NEXT_PUBLIC_LOGIN_PASSWORD || process.env.NEXT_PUBLIC_DEFAULT_PASSWORD || "ChangeMe-Owner-2026";
 
   const [email, setEmail] = useState(envEmail);
   const [password, setPassword] = useState(envPassword);

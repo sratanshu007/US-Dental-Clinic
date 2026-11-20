@@ -97,20 +97,34 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
   if (session.access) headers.Authorization = `Bearer ${session.access}`;
   if (session.user?.role === "SUPER_ADMIN" && session.clinicId) headers["X-Clinic-Id"] = session.clinicId;
 
-  const r = await fetch(`${API_URL}${path}`, {
-    method: init.method ?? (init.body ? "POST" : "GET"),
-    headers,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  if (r.status === 401 && retry && (await tryRefresh())) return api<T>(path, init, false);
-  if (r.status === 401 && !path.startsWith("/auth/")) {
-    session.clear();
-    if (typeof window !== "undefined") window.location.href = "/login?expired=1";
+  try {
+    const r = await fetch(`${API_URL}${path}`, {
+      method: init.method ?? (init.body ? "POST" : "GET"),
+      headers,
+      body: init.body ? JSON.stringify(init.body) : undefined,
+    });
+    if (r.status === 401 && retry && (await tryRefresh())) return api<T>(path, init, false);
+    if (r.status === 401 && !path.startsWith("/auth/")) {
+      session.clear();
+      if (typeof window !== "undefined") window.location.href = "/login?expired=1";
+    }
+    const text = await r.text();
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      throw new ApiError(r.status, data?.error ?? data?.message ?? (text.length < 100 && text.trim() ? text.trim() : `Request failed (${r.status})`));
+    }
+    return data as T;
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err;
+    throw new Error(err.message === "Failed to fetch"
+      ? `Cannot connect to API server (${API_URL}). Server may be waking up or check API URL.`
+      : (err.message ?? "Network error"));
   }
-  const text = await r.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!r.ok) throw new ApiError(r.status, data?.error ?? `Request failed (${r.status})`);
-  return data as T;
 }
 
 export async function logout() {

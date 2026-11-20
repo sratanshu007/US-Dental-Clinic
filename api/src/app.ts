@@ -18,15 +18,21 @@ export function createApp() {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: false })); // Plivo webhooks are form-encoded
 
-  // Webhooks + internal: server-to-server, no CORS
+  // Webhooks + internal: server-to-server
   app.use("/webhooks", webhookRouter);
   app.use("/internal", internalRouter);
 
-  const browser = cors({ origin: config.corsOrigins, credentials: false });
-  app.use("/auth", browser, authRouter);
-  app.use("/api/crm", browser, crmRouter);
-  app.use("/api", browser, clinicRouter);
-  app.use("/admin", browser, adminRouter);
+  const isWildcard = config.corsOrigins.includes("*");
+  const browser = cors({
+    origin: isWildcard ? true : config.corsOrigins,
+    credentials: true,
+  });
+  app.use(browser);
+
+  app.use("/auth", authRouter);
+  app.use("/api/crm", crmRouter);
+  app.use("/api", clinicRouter);
+  app.use("/admin", adminRouter);
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
   app.use(errorHandler);
