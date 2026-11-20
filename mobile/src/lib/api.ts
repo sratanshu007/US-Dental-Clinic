@@ -41,7 +41,7 @@ function resolveApiUrl(): string {
     }
   }
 
-  return cleanUrl(envUrl || extraUrl || "http://localhost:4000");
+  return cleanUrl(envUrl || extraUrl || "");
 }
 
 export const API_URL: string = resolveApiUrl();

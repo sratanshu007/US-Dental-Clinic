@@ -30,14 +30,14 @@ export const config = {
   // When true, SMS and outbound calls are logged instead of sent (local dev / demos)
   dryRun: process.env.DRY_RUN === "true" || !process.env.PLIVO_AUTH_ID,
 
-  // Login credentials & Clinic info (configured via environment)
-  adminEmail: (process.env.ADMIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "admin@deificdigital.com").toLowerCase(),
-  adminPassword: process.env.ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe-Admin-2026",
-  ownerEmail: (process.env.OWNER_EMAIL ?? process.env.SEED_OWNER_EMAIL ?? "owner@demo-dental.com").toLowerCase(),
-  ownerPassword: process.env.OWNER_PASSWORD ?? process.env.SEED_OWNER_PASSWORD ?? "ChangeMe-Owner-2026",
-  clinicName: process.env.CLINIC_NAME ?? process.env.SEED_CLINIC_NAME ?? "Demo Family Dental",
-  clinicPhone: process.env.CLINIC_PHONE ?? process.env.SEED_CLINIC_NUMBER ?? "+12105550100",
-  clinicTransferPhone: process.env.CLINIC_TRANSFER_PHONE ?? "+12105550199",
+  // Login credentials & Clinic info (strictly configured via environment variables)
+  adminEmail: (process.env.ADMIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "").toLowerCase(),
+  adminPassword: process.env.ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "",
+  ownerEmail: (process.env.OWNER_EMAIL ?? process.env.SEED_OWNER_EMAIL ?? "").toLowerCase(),
+  ownerPassword: process.env.OWNER_PASSWORD ?? process.env.SEED_OWNER_PASSWORD ?? "",
+  clinicName: process.env.CLINIC_NAME ?? process.env.SEED_CLINIC_NAME ?? "",
+  clinicPhone: process.env.CLINIC_PHONE ?? process.env.SEED_CLINIC_NUMBER ?? "",
+  clinicTransferPhone: process.env.CLINIC_TRANSFER_PHONE ?? "",
   clinicTimezone: process.env.CLINIC_TIMEZONE ?? "America/Chicago",
-  clinicAddress: process.env.CLINIC_ADDRESS ?? "123 Main St, San Antonio, TX",
+  clinicAddress: process.env.CLINIC_ADDRESS ?? "",
 };

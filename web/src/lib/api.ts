@@ -3,26 +3,38 @@
 // API client for the clinic dashboard.
 // Tokens live in sessionStorage (cleared when the tab closes) — never localStorage.
 
-export function getApiUrl(): string {
-  if (typeof window !== "undefined") {
-    const custom = window.localStorage?.getItem("dai.api_url");
-    if (custom) return custom.replace(/\/$/, "");
-
-    const env = process.env.NEXT_PUBLIC_API_URL;
-    if (env && !env.includes("localhost") && !env.includes("127.0.0.1")) {
-      return env.startsWith("http") ? env.replace(/\/$/, "") : `https://${env}`.replace(/\/$/, "");
-    }
-
-    if (window.location.protocol === "https:") {
-      return "https://dental-api-7h2u.onrender.com";
-    }
-  }
-
-  let u = process.env.NEXT_PUBLIC_API_URL || "https://dental-api-7h2u.onrender.com";
-  if (u && !u.startsWith("http://") && !u.startsWith("https://")) {
+export function sanitizeApiUrl(raw?: string | null): string {
+  if (!raw) return "";
+  let u = raw.trim();
+  if (!u) return "";
+  if (!u.startsWith("http://") && !u.startsWith("https://")) {
     u = `https://${u}`;
   }
-  return u.replace(/\/$/, "");
+  u = u.replace(/\/$/, "");
+  // If user entered e.g. https://dental-api-7h2u without domain dot
+  const withoutProto = u.replace(/^https?:\/\//, "");
+  if (!withoutProto.includes(".")) {
+    u = `${u}.onrender.com`;
+  }
+  return u;
+}
+
+export function getApiUrl(): string {
+  let u = "";
+
+  // 1. Check user override in browser storage
+  if (typeof window !== "undefined") {
+    const custom = window.localStorage?.getItem("dai.api_url");
+    if (custom && custom.trim()) {
+      u = sanitizeApiUrl(custom);
+      window.localStorage?.setItem("dai.api_url", u);
+      return u;
+    }
+  }
+
+  // 2. Strictly read from environment variable (no hardcoded fallback)
+  u = sanitizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
+  return u;
 }
 
 export const API_URL = getApiUrl();

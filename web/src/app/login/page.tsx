@@ -2,15 +2,15 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api, getApiUrl, session } from "@/lib/api";
+import { api, getApiUrl, sanitizeApiUrl, session } from "@/lib/api";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
 
-  // Read login credentials dynamically from environment (.env.local)
-  const envEmail = process.env.NEXT_PUBLIC_LOGIN_EMAIL || process.env.NEXT_PUBLIC_DEFAULT_EMAIL || "owner@demo-dental.com";
-  const envPassword = process.env.NEXT_PUBLIC_LOGIN_PASSWORD || process.env.NEXT_PUBLIC_DEFAULT_PASSWORD || "ChangeMe-Owner-2026";
+  // Read login credentials dynamically from environment (.env.local / Render env)
+  const envEmail = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? "";
+  const envPassword = process.env.NEXT_PUBLIC_LOGIN_PASSWORD ?? "";
 
   const [email, setEmail] = useState(envEmail);
   const [password, setPassword] = useState(envPassword);
@@ -113,25 +113,38 @@ function LoginForm() {
         )}
 
         <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--line)", fontSize: 11, color: "var(--muted)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>API: <code style={{ fontSize: 10 }}>{apiEndpoint || "detecting..."}</code></span>
-          <button
-            type="button"
-            onClick={() => {
-              const custom = prompt("Enter your Render dental-api URL (e.g. https://dental-api-xxxx.onrender.com):", apiEndpoint);
-              if (custom !== null) {
-                if (custom.trim()) {
-                  localStorage.setItem("dai.api_url", custom.trim());
-                  setApiEndpoint(custom.trim());
-                } else {
-                  localStorage.removeItem("dai.api_url");
-                  setApiEndpoint(getApiUrl());
+          <span>API: <code style={{ fontSize: 10 }}>{apiEndpoint || "not set"}</code></span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const custom = prompt("Enter your Render dental-api URL (e.g. https://dental-api-7h2u.onrender.com):", apiEndpoint);
+                if (custom !== null) {
+                  const sanitized = sanitizeApiUrl(custom);
+                  if (sanitized) {
+                    localStorage.setItem("dai.api_url", sanitized);
+                    setApiEndpoint(sanitized);
+                  } else {
+                    localStorage.removeItem("dai.api_url");
+                    setApiEndpoint(getApiUrl());
+                  }
                 }
-              }
-            }}
-            style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "1px solid var(--line)", borderRadius: 4, cursor: "pointer", color: "var(--brand)" }}
-          >
-            Change API
-          </button>
+              }}
+              style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "1px solid var(--line)", borderRadius: 4, cursor: "pointer", color: "var(--brand)" }}
+            >
+              Change
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem("dai.api_url");
+                setApiEndpoint(getApiUrl());
+              }}
+              style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "1px solid var(--line)", borderRadius: 4, cursor: "pointer", color: "var(--muted)" }}
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
         <p className="small muted" style={{ marginBottom: 0, marginTop: 8 }}>

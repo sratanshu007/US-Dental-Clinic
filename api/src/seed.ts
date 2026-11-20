@@ -18,6 +18,11 @@ async function main() {
   const clinicTimezone = config.clinicTimezone;
   const clinicAddress = config.clinicAddress;
 
+  if (!adminEmail || !adminPass || !ownerEmail || !ownerPass) {
+    console.log("[seed] Skipped: ADMIN_EMAIL, ADMIN_PASSWORD, OWNER_EMAIL, and OWNER_PASSWORD must be configured in environment.");
+    return;
+  }
+
   // 1. Super Admin (create if missing, update credentials if changed in env)
   const existingAdmin =
     (await db.query.users.findFirst({ where: eq(schema.users.email, adminEmail) })) ??
