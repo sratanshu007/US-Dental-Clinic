@@ -3,13 +3,28 @@
 // API client for the clinic dashboard.
 // Tokens live in sessionStorage (cleared when the tab closes) — never localStorage.
 
-function getApiUrl(): string {
+export function getApiUrl(): string {
+  if (typeof window !== "undefined") {
+    const custom = window.localStorage?.getItem("dai.api_url");
+    if (custom) return custom.replace(/\/$/, "");
+
+    const env = process.env.NEXT_PUBLIC_API_URL;
+    if (window.location.protocol === "https:" && (!env || env.includes("localhost") || env.includes("127.0.0.1"))) {
+      const host = window.location.hostname;
+      if (host.includes(".onrender.com")) {
+        const apiHost = host.replace("dental-web", "dental-api").replace("-web", "-api");
+        return `https://${apiHost}`;
+      }
+    }
+  }
+
   let u = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   if (u && !u.startsWith("http://") && !u.startsWith("https://")) {
     u = `https://${u}`;
   }
   return u.replace(/\/$/, "");
 }
+
 export const API_URL = getApiUrl();
 
 export type Role = "SUPER_ADMIN" | "CLINIC_OWNER" | "CLINIC_STAFF";
@@ -97,8 +112,9 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
   if (session.access) headers.Authorization = `Bearer ${session.access}`;
   if (session.user?.role === "SUPER_ADMIN" && session.clinicId) headers["X-Clinic-Id"] = session.clinicId;
 
+  const base = getApiUrl();
   try {
-    const r = await fetch(`${API_URL}${path}`, {
+    const r = await fetch(`${base}${path}`, {
       method: init.method ?? (init.body ? "POST" : "GET"),
       headers,
       body: init.body ? JSON.stringify(init.body) : undefined,
@@ -122,7 +138,7 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
     throw new Error(err.message === "Failed to fetch"
-      ? `Cannot connect to API server (${API_URL}). Server may be waking up or check API URL.`
+      ? `Cannot connect to API server (${base}). Server may be waking up or check API URL.`
       : (err.message ?? "Network error"));
   }
 }

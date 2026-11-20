@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api, session } from "@/lib/api";
+import { api, getApiUrl, session } from "@/lib/api";
 
 function LoginForm() {
   const router = useRouter();
@@ -18,6 +18,11 @@ function LoginForm() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(params.get("expired") ? "Your session ended. Please sign in again." : null);
   const [busy, setBusy] = useState(false);
+  const [apiEndpoint, setApiEndpoint] = useState("");
+
+  useEffect(() => {
+    setApiEndpoint(getApiUrl());
+  }, []);
 
   const done = (t: any) => {
     session.save(t);
@@ -106,6 +111,28 @@ function LoginForm() {
             💡 Credentials configured from environment variables.
           </p>
         )}
+
+        <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--line)", fontSize: 11, color: "var(--muted)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>API: <code style={{ fontSize: 10 }}>{apiEndpoint || "detecting..."}</code></span>
+          <button
+            type="button"
+            onClick={() => {
+              const custom = prompt("Enter your Render dental-api URL (e.g. https://dental-api-xxxx.onrender.com):", apiEndpoint);
+              if (custom !== null) {
+                if (custom.trim()) {
+                  localStorage.setItem("dai.api_url", custom.trim());
+                  setApiEndpoint(custom.trim());
+                } else {
+                  localStorage.removeItem("dai.api_url");
+                  setApiEndpoint(getApiUrl());
+                }
+              }
+            }}
+            style={{ fontSize: 10, padding: "2px 6px", background: "none", border: "1px solid var(--line)", borderRadius: 4, cursor: "pointer", color: "var(--brand)" }}
+          >
+            Change API
+          </button>
+        </div>
 
         <p className="small muted" style={{ marginBottom: 0, marginTop: 8 }}>
           This system contains protected health information. Access is logged.
