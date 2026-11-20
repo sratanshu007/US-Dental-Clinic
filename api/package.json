@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "npx drizzle-kit migrate && node dist/seed.js && node dist/server.js",
     "seed": "tsx src/seed.ts",
     "seed:prod": "node dist/seed.js",
     "db:generate": "drizzle-kit generate",

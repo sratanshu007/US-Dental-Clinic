@@ -17,8 +17,7 @@ services:
     plan: free
     rootDir: api
     buildCommand: npm install && npm run build
-    preDeployCommand: npx drizzle-kit migrate && node dist/seed.js
-    startCommand: node dist/server.js
+    startCommand: npm run start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
