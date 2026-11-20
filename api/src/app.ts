@@ -35,6 +35,12 @@ export function createApp() {
   app.use("/admin", adminRouter);
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/", (_req, res) => res.json({
+    name: "Dental AI Receptionist API",
+    status: "online",
+    health: "/health",
+    version: "1.0.0"
+  }));
   app.use(errorHandler);
   return app;
 }
