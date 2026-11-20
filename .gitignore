@@ -13,3 +13,7 @@ __pycache__/
 web/out/
 mobile/ios/
 mobile/android/
+android/
+ios/
+*.apk
+*.aab

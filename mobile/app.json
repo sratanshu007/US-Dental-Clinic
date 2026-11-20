@@ -36,7 +36,7 @@
       ]
     ],
     "extra": {
-      "apiUrl": "http://192.168.1.33:4000",
+      "apiUrl": "https://dental-api-7h2u.onrender.com",
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
       }
