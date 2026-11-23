@@ -10,6 +10,7 @@ import { audit } from "../lib/audit";
 import { ah, badRequest, notFound } from "../lib/http";
 import { normalizeUsPhone } from "../lib/phone";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { syncPlivoNumber } from "../services/sms";
 import { publicUser } from "./auth";
 
 export const adminRouter = Router();
@@ -79,6 +80,7 @@ adminRouter.post("/clinics", ah(async (req, res) => {
     ]);
     return { clinic, owner };
   });
+  void syncPlivoNumber(phone);
   await audit(req, { action: "CREATE_CLINIC", entity: "clinic", entityId: result.clinic.id, clinicId: result.clinic.id });
   res.status(201).json({ clinic: result.clinic, owner: publicUser(result.owner) });
 }));
@@ -92,6 +94,7 @@ adminRouter.patch("/clinics/:id", ah(async (req, res) => {
   }
   const [c] = await db.update(schema.clinics).set(b).where(eq(schema.clinics.id, req.params.id)).returning();
   if (!c) throw notFound();
+  if (b.aiPhoneNumber) void syncPlivoNumber(b.aiPhoneNumber);
   await audit(req, { action: "UPDATE_CLINIC", entity: "clinic", entityId: c.id, clinicId: c.id, meta: b });
   res.json(c);
 }));

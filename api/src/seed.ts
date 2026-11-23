@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pool, schema } from "./db";
 import { DEFAULT_HOURS } from "./routes/admin";
 import { createLead } from "./services/crm";
+import { syncPlivoNumber } from "./services/sms";
 import { config } from "./config";
 
 async function main() {
@@ -88,6 +89,10 @@ async function main() {
       })
       .where(eq(schema.clinics.id, clinic.id));
     console.log(`[seed] Synchronized clinic: ${clinicName}`);
+  }
+
+  if (clinicPhone) {
+    void syncPlivoNumber(clinicPhone);
   }
 
   // 3. Clinic Owner (create if missing, update credentials if changed in env)

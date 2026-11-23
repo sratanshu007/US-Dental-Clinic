@@ -14,6 +14,7 @@ import { dailySummary, rangeSummary } from "../services/reports";
 import {
   bookAppointment, findNextSlots, getAvailability, getClinic, setAppointmentStatus, upsertPatient,
 } from "../services/scheduling";
+import { syncPlivoNumber } from "../services/sms";
 import { publicUser } from "./auth";
 
 export const clinicRouter = Router();
@@ -401,6 +402,7 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const b = z.object({
     name: z.string().min(2).optional(),
+    aiPhoneNumber: z.string().optional(),
     transferNumber: z.string().nullable().optional(),
     timezone: z.string().optional(),
     address: z.string().nullable().optional(),
@@ -411,6 +413,7 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
     aiGreeting: z.string().max(500).nullable().optional(),
     aiExtraInstructions: z.string().max(4000).nullable().optional(),
     smsEnabled: z.boolean().optional(),
+    smsStyle: z.enum(["FULL", "LINK"]).optional(),
     reminderHoursBefore: z.number().int().min(1).max(168).optional(),
     noShowFollowUp: z.boolean().optional(),
     noShowDelayMinutes: z.number().int().min(0).max(4320).optional(),
@@ -424,13 +427,29 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
     taskDigestTime: hhmm.optional(),
     retentionDays: z.number().int().min(7).max(3650).optional(),
   }).parse(req.body);
+  if (b.aiPhoneNumber) {
+    const p = normalizeUsPhone(b.aiPhoneNumber);
+    if (!p) throw badRequest("Invalid AI phone number");
+    b.aiPhoneNumber = p;
+    void syncPlivoNumber(p);
+  }
   if (b.transferNumber) {
     const t = normalizeUsPhone(b.transferNumber);
     if (!t) throw badRequest("Invalid transfer number");
     b.transferNumber = t;
   }
   if (b.timezone && !DateTime.now().setZone(b.timezone).isValid) throw badRequest("Invalid timezone");
-  const [clinic] = await db.update(schema.clinics).set(b as any).where(eq(schema.clinics.id, clinicId)).returning();
+  let clinic;
+  try {
+    [clinic] = await db.update(schema.clinics).set(b as any).where(eq(schema.clinics.id, clinicId)).returning();
+  } catch (err: any) {
+    console.error("[settings:update] error:", err);
+    if (err?.code === "23505" || err?.message?.includes("unique")) {
+      throw badRequest("This AI phone number is already assigned to another clinic");
+    }
+    throw badRequest(err?.message || "Failed to update settings");
+  }
+  if (!clinic) throw notFound("Clinic not found");
   await audit(req, { action: "UPDATE_SETTINGS", clinicId, meta: { fields: Object.keys(b) } });
   res.json(clinic);
 }));

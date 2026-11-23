@@ -43,7 +43,9 @@ export async function sendSms(
     try {
       const res = await plivoClient().messages.create(clinic.aiPhoneNumber, patient.phone, body, {
         url: `${config.publicApiUrl}/webhooks/plivo/sms-status`,
-      });
+        // log=false: Plivo does not keep the text and masks the number in its logs (we keep our own encrypted copy)
+        ...(config.plivo.redactSms ? { log: false } : {}),
+      } as Record<string, unknown>);
       providerMessageId = (res as { messageUuid?: string[] }).messageUuid?.[0] ?? null;
     } catch (e) {
       console.error(`[sms] failed to ${maskPhone(patient.phone)}:`, (e as Error).message);
@@ -63,4 +65,60 @@ export async function sendSms(
     status,
   });
   return { sent: status !== "failed", reason: status === "failed" ? "Provider error" : undefined };
+}
+
+/**
+ * Automatically wire a clinic's number in Plivo:
+ * Creates/updates the "Dental AI Receptionist" Application with webhooks
+ * and attaches the number to it.
+ */
+export async function syncPlivoNumber(phoneNumber: string): Promise<void> {
+  if (!config.plivo.authId || !config.plivo.authToken) return;
+  const digits = phoneNumber.replace(/\D/g, "");
+  if (!digits || digits.length < 10) return;
+
+  try {
+    const pc = plivoClient();
+    const voiceUrl = process.env.PUBLIC_VOICE_URL || config.voiceAgentUrl;
+    const answerUrl = `${voiceUrl.replace(/\/$/, "")}/plivo/answer`;
+    const hangupUrl = `${voiceUrl.replace(/\/$/, "")}/plivo/hangup`;
+    const messageUrl = `${config.publicApiUrl.replace(/\/$/, "")}/webhooks/plivo/sms`;
+
+    // 1. Find or create the Application
+    const appsRes: any = await pc.applications.list();
+    const apps: any[] = appsRes.objects || (Array.isArray(appsRes) ? appsRes : []);
+    let app = apps.find((a: any) => a.appName === "Dental AI Receptionist" || a.app_name === "Dental AI Receptionist");
+
+    let appId = "";
+    if (app) {
+      appId = app.appId || app.app_id;
+      await (pc.applications as any).update(appId, {
+        answerUrl,
+        answerMethod: "POST",
+        hangupUrl,
+        hangupMethod: "POST",
+        messageUrl,
+        messageMethod: "POST",
+      });
+    } else {
+      const created: any = await (pc.applications as any).create("Dental AI Receptionist", {
+        answerUrl,
+        answerMethod: "POST",
+        hangupUrl,
+        hangupMethod: "POST",
+        messageUrl,
+        messageMethod: "POST",
+      });
+      appId = created.appId || created.app_id;
+    }
+
+    // 2. Attach the number to this Application
+    if (appId) {
+      await pc.numbers.update(digits, { appId });
+      console.log(`[plivo] Auto-wired number +${digits} to Plivo Application (${appId})`);
+    }
+  } catch (err: any) {
+    // Non-blocking notice (e.g. if test numbers like +12105550100 are not owned on Plivo)
+    console.warn(`[plivo] Notice for +${digits}: ${(err as Error).message}`);
+  }
 }

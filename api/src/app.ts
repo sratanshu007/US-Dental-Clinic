@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth";
 import { clinicRouter } from "./routes/clinic";
 import { crmRouter } from "./routes/crm";
 import { internalRouter } from "./routes/internal";
+import { patientRouter } from "./routes/patient";
 import { webhookRouter } from "./routes/webhooks";
 
 export function createApp() {
@@ -21,6 +22,8 @@ export function createApp() {
   // Webhooks + internal: server-to-server
   app.use("/webhooks", webhookRouter);
   app.use("/internal", internalRouter);
+  // Public secure-link pages for patients (no login; token + check question)
+  app.use("/p", patientRouter);
 
   const isWildcard = config.corsOrigins.includes("*");
   const browser = cors({

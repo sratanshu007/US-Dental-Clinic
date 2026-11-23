@@ -18,10 +18,16 @@ export const config = {
   internalApiKey: required("INTERNAL_API_KEY"),
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",").map((s) => s.trim()),
   publicApiUrl: process.env.PUBLIC_API_URL ?? "http://localhost:4000",
+  // Public base URL for secure patient links in texts, e.g. https://dd-care.com (proxied to this API).
+  // Use your own short domain — carriers often block public link shorteners.
+  patientLinkBase: (process.env.PATIENT_LINK_BASE ?? process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, ""),
   voiceAgentUrl: process.env.VOICE_AGENT_URL ?? "http://localhost:7860",
   plivo: {
     authId: process.env.PLIVO_AUTH_ID ?? "",
     authToken: process.env.PLIVO_AUTH_TOKEN ?? "",
+    // Transport-only mode: ask Plivo not to store SMS text (and to mask the patient number) in its logs.
+    // Keep this on unless you have a BAA with Plivo and need its message logs for debugging.
+    redactSms: process.env.PLIVO_REDACT_SMS !== "false",
   },
   accessTokenMinutes: Number(process.env.ACCESS_TOKEN_MINUTES ?? 60),
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7),

@@ -27,6 +27,9 @@ export const taskStatusEnum = pgEnum("task_status", ["PENDING", "IN_PROGRESS", "
 export const leadStatusEnum = pgEnum("lead_status", ["NEW", "CONTACTED", "APPT", "PLAN", "WON", "LOST"]);
 export const crmActivityEnum = pgEnum("crm_activity_type", ["CALL", "SMS", "EMAIL", "NOTE", "APPT", "STAGE", "TASK", "CREATED"]);
 export const crmTaskTypeEnum = pgEnum("crm_task_type", ["CALL", "TEXT", "EMAIL", "OTHER"]);
+// FULL: texts include the appointment day/time. LINK: texts carry only a secure link (details stay on our server).
+export const smsStyleEnum = pgEnum("sms_style", ["FULL", "LINK"]);
+export const patientLinkPurposeEnum = pgEnum("patient_link_purpose", ["BOOKED", "REMINDER", "CONFIRMED"]);
 export const channelEnum = pgEnum("channel", ["CALL", "SMS"]);
 
 /** { mon: [["09:00","17:00"]], tue: [...], ... } — an empty list means closed that day. */
@@ -46,6 +49,7 @@ export const clinics = pgTable("clinics", {
   aiGreeting: text("ai_greeting"),
   aiExtraInstructions: text("ai_extra_instructions"), // insurance, parking, pricing policy...
   smsEnabled: boolean("sms_enabled").notNull().default(true),
+  smsStyle: smsStyleEnum("sms_style").notNull().default("LINK"),
   reminderHoursBefore: integer("reminder_hours_before").notNull().default(24),
   noShowFollowUp: boolean("no_show_follow_up").notNull().default(true),
   noShowDelayMinutes: integer("no_show_delay_minutes").notNull().default(120),
@@ -286,6 +290,27 @@ export type Lead = typeof leads.$inferSelect;
 // ---------------- relations (for db.query ... with) ----------------
 import { relations } from "drizzle-orm";
 
+/**
+ * Secure links sent by SMS in LINK mode. The token itself is never stored, only its SHA-256.
+ * The patient must answer a check question (last name) before any detail is shown.
+ */
+export const patientLinks = pgTable("patient_links", {
+  id: id(),
+  clinicId: text("clinic_id").notNull().references(() => clinics.id),
+  patientId: text("patient_id").notNull().references(() => patients.id),
+  appointmentId: text("appointment_id").references(() => appointments.id),
+  purpose: patientLinkPurposeEnum("purpose").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  sessionHash: text("session_hash"),
+  sessionExpiresAt: timestamp("session_expires_at", { withTimezone: true }),
+  openedAt: timestamp("opened_at", { withTimezone: true }),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [index("patient_links_patient").on(t.patientId)]);
+
 export const clinicsRelations = relations(clinics, ({ many }) => ({
   users: many(users), providers: many(providers), services: many(services), patients: many(patients),
 }));
@@ -330,4 +355,9 @@ export const outboundTasksRelations = relations(outboundTasks, ({ one }) => ({
   clinic: one(clinics, { fields: [outboundTasks.clinicId], references: [clinics.id] }),
   patient: one(patients, { fields: [outboundTasks.patientId], references: [patients.id] }),
   appointment: one(appointments, { fields: [outboundTasks.appointmentId], references: [appointments.id] }),
+}));
+export const patientLinksRelations = relations(patientLinks, ({ one }) => ({
+  clinic: one(clinics, { fields: [patientLinks.clinicId], references: [clinics.id] }),
+  patient: one(patients, { fields: [patientLinks.patientId], references: [patients.id] }),
+  appointment: one(appointments, { fields: [patientLinks.appointmentId], references: [appointments.id] }),
 }));

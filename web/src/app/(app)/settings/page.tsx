@@ -51,6 +51,7 @@ export default function Settings() {
         <div className="card">
           <div className="grid k2">
             <div className="field"><label>Clinic name</label><input value={c.name} onChange={set("name")} /></div>
+            <div className="field"><label>AI phone number (Plivo number)</label><input value={c.aiPhoneNumber ?? ""} onChange={set("aiPhoneNumber")} placeholder="+12105550100" /></div>
             <div className="field"><label>Time zone</label>
               <select value={c.timezone} onChange={set("timezone")}>
                 {["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"].map((z) => <option key={z}>{z}</option>)}
@@ -68,7 +69,7 @@ export default function Settings() {
             <textarea rows={6} value={c.aiExtraInstructions ?? ""} onChange={set("aiExtraInstructions")} placeholder="We accept Delta Dental, Cigna, Aetna. New patient special $99. Free parking behind the building. We do not treat children under 3." />
             <div className="small muted">Don&apos;t put patient information here.</div>
           </div>
-          <button className="primary" onClick={() => saveClinic(["name", "timezone", "address", "website", "transferNumber", "slotMinutes", "aiEnabled", "aiGreeting", "aiExtraInstructions"])}>Save</button>
+          <button className="primary" onClick={() => saveClinic(["name", "aiPhoneNumber", "timezone", "address", "website", "transferNumber", "slotMinutes", "aiEnabled", "aiGreeting", "aiExtraInstructions"])}>Save</button>
         </div>
       )}
 
@@ -104,6 +105,13 @@ export default function Settings() {
         <div className="card">
           <h3>Text messages</h3>
           <div className="field"><label className="check"><input type="checkbox" checked={c.smsEnabled} onChange={set("smsEnabled")} /> Send texts (booking confirmations, reminders)</label></div>
+          <div className="field" style={{ maxWidth: 520 }}>
+            <label>What the text contains</label>
+            <select value={c.smsStyle ?? "LINK"} onChange={set("smsStyle")}>
+              <option value="LINK">Secure link only (recommended for HIPAA) — details shown after the patient confirms it&apos;s them</option>
+              <option value="FULL">Day and time in the text</option>
+            </select>
+          </div>
           <div className="field" style={{ maxWidth: 260 }}><label>Reminder text, hours before visit</label><input type="number" value={c.reminderHoursBefore} onChange={set("reminderHoursBefore")} /></div>
           <h3 style={{ marginTop: 18 }}>No-shows</h3>
           <div className="field"><label className="check"><input type="checkbox" checked={c.noShowFollowUp} onChange={set("noShowFollowUp")} /> AI calls no-show patients to rebook</label></div>
@@ -125,7 +133,7 @@ export default function Settings() {
           </div>
           <div className="field" style={{ maxWidth: 260 }}><label>Morning CRM follow-up reminder</label><input type="time" value={c.taskDigestTime} onChange={set("taskDigestTime")} /></div>
           <div className="field" style={{ maxWidth: 260 }}><label>Delete call transcripts after (days)</label><input type="number" value={c.retentionDays} onChange={set("retentionDays")} /></div>
-          <button className="primary" onClick={() => saveClinic(["smsEnabled", "reminderHoursBefore", "noShowFollowUp", "noShowDelayMinutes", "autoNoShowAfterMinutes", "feedbackEnabled", "feedbackChannel", "feedbackDelayMinutes", "callingHoursStart", "callingHoursEnd", "dailyReportTime", "taskDigestTime", "retentionDays"])}>Save</button>
+          <button className="primary" onClick={() => saveClinic(["smsEnabled", "smsStyle", "reminderHoursBefore", "noShowFollowUp", "noShowDelayMinutes", "autoNoShowAfterMinutes", "feedbackEnabled", "feedbackChannel", "feedbackDelayMinutes", "callingHoursStart", "callingHoursEnd", "dailyReportTime", "taskDigestTime", "retentionDays"])}>Save</button>
         </div>
       )}
 

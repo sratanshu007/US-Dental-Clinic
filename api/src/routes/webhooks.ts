@@ -9,7 +9,7 @@ import { encrypt } from "../lib/crypto";
 import { ah, HttpError } from "../lib/http";
 import { formatUsPhone, normalizeUsPhone } from "../lib/phone";
 import { speakable } from "../lib/time";
-import { addTask, createLead, logActivity, openLeadForPhone } from "../services/crm";
+import { requestReschedule } from "../services/crm";
 import { notifyClinic } from "../services/notify";
 import { setAppointmentStatus, upsertPatient } from "../services/scheduling";
 import { sendSms } from "../services/sms";
@@ -78,22 +78,12 @@ webhookRouter.post("/plivo/sms", ah(async (req, res) => {
 
   if (CONFIRM_WORDS.includes(word) && upcoming) {
     await setAppointmentStatus(clinic.id, upcoming.id, "CONFIRMED");
-    await sendSms(clinic, patient, `Thanks! You're confirmed for ${speakable(upcoming.startAt, clinic.timezone)}.`, "CONFIRMED", { skipConsentCheck: true });
+    await sendSms(clinic, patient, clinic.smsStyle === "LINK" ? "Thanks! You're confirmed. See you soon." : `Thanks! You're confirmed for ${speakable(upcoming.startAt, clinic.timezone)}.`, "CONFIRMED", { skipConsentCheck: true });
     return res.status(200).send("ok");
   }
 
   if (RESCHEDULE_WORDS.includes(word)) {
-    const existing = await openLeadForPhone(clinic.id, from);
-    if (existing) {
-      await logActivity(existing, "SMS", "Asked to reschedule by text.", "AI receptionist");
-      await addTask(existing, { title: "Reschedule request (text)", type: "CALL", dueInMinutes: 30 });
-    } else {
-      await createLead({
-        clinicId: clinic.id, patientId: patient.id, phone: from, name: [patient.firstName, patient.lastName].filter(Boolean).join(" ") || null,
-        interest: "Wants to reschedule (SMS reply)", source: "AI SMS", stage: "CONTACTED", actor: "AI receptionist",
-        task: { title: "Reschedule request (text)", type: "CALL", dueInMinutes: 30 },
-      });
-    }
+    await requestReschedule(clinic.id, { ...patient, phone: from }, "SMS");
     await notifyClinic(clinic.id, "NEW_LEAD", "Reschedule request", "A patient asked to reschedule by text. Open the CRM to follow up.", "/crm");
     await sendSms(clinic, patient, `No problem. Call us any time at ${formatUsPhone(clinic.aiPhoneNumber)} and our assistant will find a new time.`, "REPLY", { skipConsentCheck: true });
     return res.status(200).send("ok");

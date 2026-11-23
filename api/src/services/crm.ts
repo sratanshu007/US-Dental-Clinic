@@ -84,3 +84,19 @@ export async function addTask(
   }).returning();
   return task;
 }
+
+/** A patient asked to reschedule (text reply "R" or the secure link). Adds a call-back task for the team. */
+export async function requestReschedule(clinicId: string, patient: { id: string; phone: string; firstName: string | null; lastName: string | null }, via: "SMS" | "LINK") {
+  const label = via === "SMS" ? "text" : "secure link";
+  const existing = await openLeadForPhone(clinicId, patient.phone);
+  if (existing) {
+    await logActivity(existing, "SMS", `Asked to reschedule by ${label}.`, "AI receptionist");
+    await addTask(existing, { title: `Reschedule request (${label})`, type: "CALL", dueInMinutes: 30 });
+  } else {
+    await createLead({
+      clinicId, patientId: patient.id, phone: patient.phone, name: [patient.firstName, patient.lastName].filter(Boolean).join(" ") || null,
+      interest: `Wants to reschedule (${label})`, source: via === "SMS" ? "AI SMS" : "Patient link", stage: "CONTACTED", actor: "AI receptionist",
+      task: { title: `Reschedule request (${label})`, type: "CALL", dueInMinutes: 30 },
+    });
+  }
+}

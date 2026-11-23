@@ -11,6 +11,7 @@ import { notifyClinic } from "../services/notify";
 import { dailySummary } from "../services/reports";
 import { setAppointmentStatus } from "../services/scheduling";
 import { sendSms } from "../services/sms";
+import { reminderText } from "../services/smsText";
 
 const running = new Set<string>();
 async function once(name: string, fn: () => Promise<void>) {
@@ -43,8 +44,7 @@ export async function sendReminders() {
     for (const a of due) {
       // Mark first so a crash never double-texts
       await db.update(schema.appointments).set({ reminderSentAt: new Date() }).where(eq(schema.appointments.id, a.id));
-      const confirmAsk = a.status === "CONFIRMED" ? "" : " Reply C to confirm or R to reschedule.";
-      await sendSms(clinic, a.patient, `${clinic.name} reminder: your appointment is ${speakable(a.startAt, clinic.timezone)}.${confirmAsk}`, "REMINDER");
+      await sendSms(clinic, a.patient, await reminderText(clinic, a.patient, a), "REMINDER");
     }
   }
 }
@@ -206,6 +206,8 @@ export async function purgeOldData() {
     await db.delete(schema.smsMessages).where(and(eq(schema.smsMessages.clinicId, clinic.id), lt(schema.smsMessages.createdAt, cutoff)));
   }
   await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, new Date()));
+  // Secure patient links: drop them a week after they expire
+  await db.delete(schema.patientLinks).where(lt(schema.patientLinks.expiresAt, DateTime.now().minus({ days: 7 }).toJSDate()));
 }
 
 export function startJobs() {

@@ -6,6 +6,7 @@ import { badRequest, HttpError, notFound } from "../lib/http";
 import { nextCallingTime, openWindows, speakable } from "../lib/time";
 import { notifyClinic } from "./notify";
 import { sendSms } from "./sms";
+import { bookedText } from "./smsText";
 
 /** Statuses that occupy a slot on the calendar. */
 export const ACTIVE_STATUSES = ["BOOKED", "CONFIRMED", "SHOWED"] as const;
@@ -227,12 +228,7 @@ export async function bookAppointment(input: BookInput): Promise<Appointment> {
       `/appointments/${appt.created.id}`,
     );
   }
-  await sendSms(
-    clinic,
-    appt.patient,
-    `${clinic.name}: your appointment is set for ${when}.`,
-    "BOOKED",
-  );
+  await sendSms(clinic, appt.patient, await bookedText(clinic, appt.patient, appt.created), "BOOKED");
   return appt.created;
 }
 
