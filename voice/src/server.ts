@@ -154,6 +154,15 @@ app.post("/outbound/start", async (req, res) => {
   }
 });
 
+app.get("/", (_req, res) => {
+  res.json({
+    service: "dental-ai-voice",
+    status: "online",
+    health: "/health",
+    ready: "/ready",
+  });
+});
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/ready", async (_req, res) => {

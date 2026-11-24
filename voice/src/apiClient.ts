@@ -52,7 +52,14 @@ export async function taskResult(taskId: string, status: string, error: string |
 
 export async function apiReady(): Promise<boolean> {
   try {
-    const r = await fetch(`${config.apiUrl}/ready`, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${config.apiUrl}/health`, { signal: AbortSignal.timeout(5000) });
     return r.ok;
-  } catch { return false; }
+  } catch {
+    try {
+      const r2 = await fetch(`${config.apiUrl}/ready`, { signal: AbortSignal.timeout(5000) });
+      return r2.ok;
+    } catch {
+      return false;
+    }
+  }
 }
