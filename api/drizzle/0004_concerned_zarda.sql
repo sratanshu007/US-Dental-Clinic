@@ -1,0 +1,1 @@
+ALTER TABLE "clinics" ADD COLUMN "sms_only_booked" boolean DEFAULT true NOT NULL;

@@ -1,0 +1,42 @@
+# Four hostnames, one server. Certificates are automatic (Let's Encrypt).
+(security) {
+	header {
+		-Server
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	# Request bodies over 2 MB are never legitimate here
+	request_body {
+		max_size 2MB
+	}
+}
+
+{$API_DOMAIN} {
+	import security
+	# The internal tool API is only for the voice container on the private network
+	@internal path /internal/*
+	respond @internal 404
+	reverse_proxy api:4000
+}
+
+{$APP_DOMAIN} {
+	import security
+	reverse_proxy web:3000
+}
+
+# Plivo calls this for answer URLs and the audio WebSocket
+{$VOICE_DOMAIN} {
+	import security
+	# Plivo webhooks + media stream only; /outbound/start is for the API container
+	@outbound path /outbound/*
+	respond @outbound 404
+	reverse_proxy voice:7860
+}
+
+# Short domain for secure patient links in texts: only /p/* is exposed
+{$LINK_DOMAIN} {
+	@patient path /p/*
+	reverse_proxy @patient api:4000
+	respond 404
+}

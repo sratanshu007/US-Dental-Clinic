@@ -15,19 +15,11 @@ function routeFor(link?: string): string {
 
 export default function RootLayout() {
   useEffect(() => {
-    try {
-      const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-        const link = response.notification.request.content.data?.link as string | undefined;
-        router.push(routeFor(link) as any);
-      });
-      return () => {
-        try {
-          sub.remove();
-        } catch {}
-      };
-    } catch {
-      // In Expo Go or unsupported platforms
-    }
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const link = response.notification.request.content.data?.link as string | undefined;
+      router.push(routeFor(link) as any);
+    });
+    return () => sub.remove();
   }, []);
 
   return (

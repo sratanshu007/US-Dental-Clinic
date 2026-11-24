@@ -3,37 +3,7 @@
 // API client for the clinic dashboard.
 // Tokens live in sessionStorage (cleared when the tab closes) — never localStorage.
 
-export function sanitizeApiUrl(raw?: string | null): string {
-  if (!raw) return "";
-  let u = raw.trim();
-  if (!u) return "";
-  if (!u.startsWith("http://") && !u.startsWith("https://")) {
-    u = `https://${u}`;
-  }
-  u = u.replace(/\/$/, "");
-  // If user entered e.g. https://dental-api-7h2u without domain dot
-  const withoutProto = u.replace(/^https?:\/\//, "");
-  if (!withoutProto.includes(".") && !withoutProto.includes("localhost") && !withoutProto.includes(":")) {
-    u = `${u}.onrender.com`;
-  }
-  return u;
-}
-
-export function getApiUrl(): string {
-  // Purge any stale legacy localStorage override
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage?.removeItem("dai.api_url");
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Strictly read from environment variable
-  return sanitizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
-}
-
-export const API_URL = getApiUrl();
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export type Role = "SUPER_ADMIN" | "CLINIC_OWNER" | "CLINIC_STAFF";
 export interface SessionUser {
@@ -98,8 +68,7 @@ async function tryRefresh(): Promise<boolean> {
   if (!rt) return false;
   refreshing ??= (async () => {
     try {
-      const base = getApiUrl();
-      const r = await fetch(`${base}/auth/refresh`, {
+      const r = await fetch(`${API_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: rt }),
@@ -121,36 +90,20 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
   if (session.access) headers.Authorization = `Bearer ${session.access}`;
   if (session.user?.role === "SUPER_ADMIN" && session.clinicId) headers["X-Clinic-Id"] = session.clinicId;
 
-  const base = getApiUrl();
-  try {
-    const r = await fetch(`${base}${path}`, {
-      method: init.method ?? (init.body ? "POST" : "GET"),
-      headers,
-      body: init.body ? JSON.stringify(init.body) : undefined,
-    });
-    if (r.status === 401 && retry && (await tryRefresh())) return api<T>(path, init, false);
-    if (r.status === 401 && !path.startsWith("/auth/")) {
-      session.clear();
-      if (typeof window !== "undefined") window.location.href = "/login?expired=1";
-    }
-    const text = await r.text();
-    let data: any = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = null;
-    }
-    if (!r.ok) {
-      throw new ApiError(r.status, data?.error ?? data?.message ?? (text.length < 100 && text.trim() ? text.trim() : `Request failed (${r.status})`));
-    }
-    return data as T;
-  } catch (err: any) {
-    if (err instanceof ApiError) throw err;
-    const isFetchFailure = err.message === "Failed to fetch" || err.message === "Load failed" || err.name === "TypeError";
-    throw new Error(isFetchFailure
-      ? `Cannot connect to API server (${base || "not configured"}). Server may be waking up or check API URL.`
-      : (err.message ?? "Network error"));
+  const r = await fetch(`${API_URL}${path}`, {
+    method: init.method ?? (init.body ? "POST" : "GET"),
+    headers,
+    body: init.body ? JSON.stringify(init.body) : undefined,
+  });
+  if (r.status === 401 && retry && (await tryRefresh())) return api<T>(path, init, false);
+  if (r.status === 401 && !path.startsWith("/auth/")) {
+    session.clear();
+    if (typeof window !== "undefined") window.location.href = "/login?expired=1";
   }
+  const text = await r.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!r.ok) throw new ApiError(r.status, data?.error ?? `Request failed (${r.status})`);
+  return data as T;
 }
 
 export async function logout() {

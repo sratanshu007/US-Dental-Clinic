@@ -8,7 +8,6 @@ import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { createApp } from "../src/app";
-import { config } from "../src/config";
 import { db, pool, schema } from "../src/db";
 import { totpCode } from "../src/lib/crypto";
 import { dailyReports, dispatchOutbound, sendReminders } from "../src/jobs";
@@ -96,7 +95,7 @@ test("inbound AI call: availability -> book -> double-book blocked", async () =>
 
   const cleaning = start.json.services.find((s: any) => s.name === "Cleaning");
   const booked = await internal("/tools/book_appointment", {
-    callId, args: { startAt: bookedSlot, firstName: "Sarah", lastName: "Miller", serviceId: cleaning.id, reason: "cleaning", smsConsent: true },
+    callId, args: { startAt: bookedSlot, firstName: "Sarah", lastName: "Miller", serviceId: cleaning.id, reason: "cleaning", smsConsent: true, callConsent: true, dateOfBirth: "1988-04-12", insurance: "Delta Dental, member Sarah Miller" },
   });
   assert.equal(booked.json.ok, true, JSON.stringify(booked.json));
   apptId = booked.json.appointmentId;
@@ -115,11 +114,40 @@ test("identity check before sharing appointment details", async () => {
   const start = await internal("/calls/start", { direction: "INBOUND", from: CALLER, to: CLINIC_NUMBER });
   assert.deepEqual(start.json.patient.known, true);
   assert.equal(start.json.patient.firstName, undefined, "name is not revealed on inbound");
-  const wrong = await internal("/tools/find_my_appointments", { callId: start.json.callId, args: { firstName: "Bob" } });
-  assert.equal(wrong.json.appointments.length, 0);
-  const right = await internal("/tools/find_my_appointments", { callId: start.json.callId, args: { firstName: "sarah" } });
-  assert.equal(right.json.appointments.length, 1);
-  assert.equal(right.json.appointments[0].appointmentId, apptId);
+  assert.equal(start.json.patient.hasDob, true);
+  // Not verified yet: nothing is shared
+  const early = await internal("/tools/find_my_appointments", { callId: start.json.callId, args: {} });
+  assert.equal(early.json.appointments.length, 0);
+  // Right name without DOB: asks for DOB (not counted as a miss)
+  const needDob = await internal("/tools/verify_caller", { callId: start.json.callId, args: { firstName: "Sarah" } });
+  assert.equal(needDob.json.verified, false);
+  assert.equal(needDob.json.needs, "dateOfBirth");
+  // Wrong DOB
+  const wrong = await internal("/tools/verify_caller", { callId: start.json.callId, args: { firstName: "Sarah", dateOfBirth: "1990-01-01" } });
+  assert.equal(wrong.json.verified, false);
+  assert.equal(wrong.json.attemptsLeft, 2);
+  const right = await internal("/tools/verify_caller", { callId: start.json.callId, args: { firstName: "sarah", dateOfBirth: "April 12, 1988" } });
+  assert.equal(right.json.verified, true, JSON.stringify(right.json));
+  const list = await internal("/tools/find_my_appointments", { callId: start.json.callId, args: {} });
+  assert.equal(list.json.appointments.length, 1);
+  const right2 = list;
+  assert.equal(right2.json.appointments[0].appointmentId, apptId);
+
+  // Locks after 3 wrong answers on one call
+  const s3 = await internal("/calls/start", { direction: "INBOUND", from: CALLER, to: CLINIC_NUMBER });
+  for (let i = 0; i < 3; i++) await internal("/tools/verify_caller", { callId: s3.json.callId, args: { firstName: "Sarah", dateOfBirth: "1970-02-0" + (i + 1) } });
+  const locked = await internal("/tools/verify_caller", { callId: s3.json.callId, args: { firstName: "Sarah", dateOfBirth: "1988-04-12" } });
+  assert.equal(locked.json.locked, true);
+  // Unverified caller can't cancel either
+  const noCancel = await internal("/tools/cancel_appointment", { callId: s3.json.callId, args: { appointmentId: apptId } });
+  assert.equal(noCancel.status, 403);
+
+  // Consent and insurance were stored (encrypted) and show for staff
+  const p = await db.query.patients.findFirst({ where: eq(schema.patients.phone, CALLER) });
+  assert.equal(p!.callConsent, true);
+  assert.equal(p!.callConsentSource, "AI_CALL");
+  assert.ok(p!.insuranceEnc!.startsWith("v1:"));
+  assert.ok(p!.dobEnc!.startsWith("v1:") && p!.dobHash!.length === 64);
 
   // Another caller can't cancel Sarah's appointment
   const start2 = await internal("/calls/start", { direction: "INBOUND", from: OTHER_CALLER, to: CLINIC_NUMBER });
@@ -129,6 +157,9 @@ test("identity check before sharing appointment details", async () => {
 
 test("reschedule by AI moves the appointment", async () => {
   const start = await internal("/calls/start", { direction: "INBOUND", from: CALLER, to: CLINIC_NUMBER });
+  const blocked = await internal("/tools/reschedule_appointment", { callId: start.json.callId, args: { appointmentId: apptId, newStartAt: bookedSlot } });
+  assert.equal(blocked.status, 403, "needs verification first");
+  await internal("/tools/verify_caller", { callId: start.json.callId, args: { firstName: "Sarah", dateOfBirth: "1988-04-12" } });
   const avail = await internal("/tools/check_availability", { callId: start.json.callId, args: {} });
   const newSlot = avail.json.slots.find((s: any) => s.startAt !== bookedSlot).startAt;
   const r = await internal("/tools/reschedule_appointment", { callId: start.json.callId, args: { appointmentId: apptId, newStartAt: newSlot } });
@@ -273,7 +304,9 @@ test("jobs run without errors (dry run)", async () => {
 });
 
 test("2FA setup and login with code", async () => {
-  const setup = await call("POST", "/auth/mfa/setup");
+  const noPw = await call("POST", "/auth/mfa/setup", {});
+  assert.equal(noPw.status, 400, "setting up 2FA needs the password");
+  const setup = await call("POST", "/auth/mfa/setup", { password: OWNER_PASS });
   assert.ok(setup.json.qrDataUrl.startsWith("data:image/png"));
   const en = await call("POST", "/auth/mfa/enable", { code: totpCode(setup.json.secret) });
   assert.equal(en.status, 200, JSON.stringify(en.json));
@@ -296,9 +329,7 @@ test("audit log records PHI access", async () => {
 });
 
 test("super admin can create a clinic", async () => {
-  const adminEmail = config.adminEmail;
-  const adminPassword = config.adminPassword;
-  const l = await call("POST", "/auth/login", { email: adminEmail, password: adminPassword });
+  const l = await call("POST", "/auth/login", { email: "admin@deificdigital.com", password: "ChangeMe-Admin-2026" });
   token = l.json.accessToken;
   const num = `+1512555${String(Math.floor(Math.random() * 9000) + 1000)}`;
   const r = await call("POST", "/admin/clinics", {

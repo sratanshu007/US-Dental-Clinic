@@ -26,6 +26,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [clinicName, setClinicName] = useState("");
   const [unread, setUnread] = useState(0);
   const [crmBadge, setCrmBadge] = useState(0);
+  const [plan, setPlan] = useState<{ name: string; billingStatus: string; features: Record<string, boolean> } | null>(null);
+
+  const [loadedClinicId, setLoadedClinicId] = useState<string | null>(null);
 
   useEffect(() => {
     const u = session.user;
@@ -34,31 +37,34 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       return;
     }
     setUser(u);
+    const activeClinic = session.clinicId ?? u.clinicId ?? null;
     if (u.role === "SUPER_ADMIN" && !session.clinicId && path !== "/admin") {
       router.replace("/admin");
       return;
     }
-    if (u.role !== "SUPER_ADMIN" || session.clinicId) {
+    if ((u.role !== "SUPER_ADMIN" || session.clinicId) && (!clinicName || loadedClinicId !== activeClinic)) {
       api("/api/dashboard")
         .then((d) => {
           setClinicName(d.clinic.name);
+          setLoadedClinicId(activeClinic);
           session.setTz(d.clinic.timezone);
+          if (d.plan) setPlan(d.plan);
         })
         .catch(() => {});
     }
-  }, [path, router]);
+  }, [path, router, clinicName, loadedClinicId]);
 
   // unread notifications badge
   useEffect(() => {
     if (!user || (user.role === "SUPER_ADMIN" && !session.clinicId)) return;
     const load = () => {
       api<any[]>("/api/notifications?unread=1").then((n) => setUnread(n.length)).catch(() => {});
-      api<any>("/api/crm/summary").then((s) => setCrmBadge(s.stages.NEW.count + s.tasks.overdue)).catch(() => {});
+      if (plan?.features.crm !== false) api<any>("/api/crm/summary").then((s) => setCrmBadge(s.stages.NEW.count + s.tasks.overdue)).catch(() => {});
     };
     load();
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
-  }, [user, path]);
+  }, [user, path, plan?.features.crm]);
 
   // idle logout
   useEffect(() => {
@@ -91,14 +97,22 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             All clinics
           </Link>
         )}
+        {inClinic && plan && (
+          <div style={{ padding: "0 18px 10px", fontSize: 12, color: "#9fb4cc" }}>
+            <span style={{ background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: "2px 8px", color: "#fff", fontWeight: 600 }}>{plan.name} plan</span>
+          </div>
+        )}
         {inClinic &&
-          NAV.map((n) => (
-            <Link key={n.href} href={n.href} className={path.startsWith(n.href) ? "active" : ""}>
-              {n.label}
-              {n.badge && unread > 0 && <span className="dot">{unread}</span>}
-              {n.crm && crmBadge > 0 && <span className="dot">{crmBadge}</span>}
-            </Link>
-          ))}
+          NAV.map((n) => {
+            const locked = n.crm && plan?.features.crm === false;
+            return (
+              <Link key={n.href} href={locked ? "/settings?tab=plan" : n.href} className={path.startsWith(n.href) ? "active" : ""} title={locked ? "Included in Growth and Pro" : undefined}>
+                {n.label}{locked && " 🔒"}
+                {n.badge && unread > 0 && <span className="dot">{unread}</span>}
+                {n.crm && !locked && crmBadge > 0 && <span className="dot">{crmBadge}</span>}
+              </Link>
+            );
+          })}
         <div className="spacer" />
         <div className="who">
           {user.name}
@@ -110,7 +124,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="main">{children}</main>
+      <main className="main">
+        {inClinic && plan?.billingStatus === "PAST_DUE" && (
+          <div className="alert" style={{ marginBottom: 14 }}>Payment failed — the AI keeps answering for now. Please update your card in <Link href="/settings?tab=plan">Settings → Plan &amp; billing</Link>.</div>
+        )}
+        {inClinic && plan?.billingStatus === "CANCELED" && (
+          <div className="alert" style={{ marginBottom: 14 }}>Your subscription is canceled, so the AI receptionist is not answering calls. Reactivate in <Link href="/settings?tab=plan">Settings → Plan &amp; billing</Link> or email hello@deificdigital.com.</div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }

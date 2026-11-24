@@ -12,8 +12,10 @@ import { clinicScope, requireAuth } from "../middleware/auth";
 import { addTask, CLOSED, createLead, logActivity, setStage, STAGE_LABEL, type Stage } from "../services/crm";
 import { getClinic } from "../services/scheduling";
 
+import { requireFeature } from "../middleware/plan";
+
 export const crmRouter = Router();
-crmRouter.use(requireAuth);
+crmRouter.use(requireAuth, requireFeature("crm"));
 
 const STAGES = ["NEW", "CONTACTED", "APPT", "PLAN", "WON", "LOST"] as const;
 const stageSchema = z.enum(STAGES);

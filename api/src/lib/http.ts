@@ -30,6 +30,8 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return res.status(err.status).json({ error: err.message, details: err.details });
   }
   // Never echo internals (could contain PHI) back to the client.
-  console.error("[api] unhandled error:", err instanceof Error ? err.message : err);
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("[api] unhandled error:", msg);
+  void import("./alerts").then(({ alert, scrub }) => alert(`500:${_req.method}:${_req.route?.path ?? _req.path}`, `500 on ${_req.method} ${_req.baseUrl}${_req.route?.path ?? ""}: ${scrub(msg)}`));
   return res.status(500).json({ error: "Internal server error" });
 }

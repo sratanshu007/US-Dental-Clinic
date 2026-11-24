@@ -7,13 +7,13 @@ import { api, session } from "@/lib/api";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
+  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "admin@deificdigital.com";
+  const adminPass = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "ChangeMe-Admin-2026";
+  const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL || "owner@demo-dental.com";
+  const ownerPass = process.env.NEXT_PUBLIC_OWNER_PASSWORD || "ChangeMe-Owner-2026";
 
-  // Read login credentials dynamically from environment (.env.local / Render env)
-  const envEmail = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? "";
-  const envPassword = process.env.NEXT_PUBLIC_LOGIN_PASSWORD ?? "";
-
-  const [email, setEmail] = useState(envEmail);
-  const [password, setPassword] = useState(envPassword);
+  const [email, setEmail] = useState(adminEmail);
+  const [password, setPassword] = useState(adminPass);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(params.get("expired") ? "Your session ended. Please sign in again." : null);
@@ -30,7 +30,7 @@ function LoginForm() {
     setError(null);
     try {
       if (!mfaToken) {
-        const r = await api("/auth/login", { body: { email: email.trim(), password } });
+        const r = await api("/auth/login", { body: { email, password } });
         if (r.mfaRequired) setMfaToken(r.mfaToken);
         else done(r);
       } else {
@@ -53,25 +53,29 @@ function LoginForm() {
           <>
             <div className="field">
               <label>Email</label>
-              <input
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="owner@your-clinic.com"
-                required
-              />
+              <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             <div className="field">
               <label>Password</label>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                required
-              />
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </div>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="secondary small"
+                style={{ fontSize: "12px", padding: "4px 8px" }}
+                onClick={() => { setEmail(adminEmail); setPassword(adminPass); }}
+              >
+                Fill Super Admin
+              </button>
+              <button
+                type="button"
+                className="secondary small"
+                style={{ fontSize: "12px", padding: "4px 8px" }}
+                onClick={() => { setEmail(ownerEmail); setPassword(ownerPass); }}
+              >
+                Fill Clinic Owner
+              </button>
             </div>
           </>
         ) : (
@@ -83,8 +87,7 @@ function LoginForm() {
         <button className="primary" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
           {busy ? "Please wait…" : mfaToken ? "Verify" : "Sign in"}
         </button>
-
-        <p className="small muted" style={{ marginBottom: 0, marginTop: 14 }}>
+        <p className="small muted" style={{ marginBottom: 0 }}>
           This system contains protected health information. Access is logged.
         </p>
       </form>

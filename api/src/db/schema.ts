@@ -31,6 +31,11 @@ export const crmTaskTypeEnum = pgEnum("crm_task_type", ["CALL", "TEXT", "EMAIL",
 export const smsStyleEnum = pgEnum("sms_style", ["FULL", "LINK"]);
 export const patientLinkPurposeEnum = pgEnum("patient_link_purpose", ["BOOKED", "REMINDER", "CONFIRMED"]);
 export const channelEnum = pgEnum("channel", ["CALL", "SMS"]);
+// Subscription plan: decides minutes included and which features are on.
+export const planEnum = pgEnum("plan", ["STARTER", "GROWTH", "PRO"]);
+// TRIAL/MANUAL = no card on file (founding clinics, invoices); PAST_DUE keeps working with a warning; CANCELED stops the AI.
+export const billingStatusEnum = pgEnum("billing_status", ["TRIAL", "MANUAL", "ACTIVE", "PAST_DUE", "CANCELED"]);
+export const pmsTypeEnum = pgEnum("pms_type", ["NONE", "OPEN_DENTAL"]);
 
 /** { mon: [["09:00","17:00"]], tue: [...], ... } — an empty list means closed that day. */
 export type BusinessHours = Record<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun", [string, string][]>;
@@ -64,7 +69,26 @@ export const clinics = pgTable("clinics", {
   taskDigestTime: text("task_digest_time").notNull().default("09:00"),
   lastTaskDigestDate: text("last_task_digest_date"),
   retentionDays: integer("retention_days").notNull().default(90),
+  // Texts go out only for a booked appointment (confirmation + reminders). No "we missed you" / feedback texts.
+  smsOnlyBooked: boolean("sms_only_booked").notNull().default(true),
   active: boolean("active").notNull().default(true),
+  // Plan + billing
+  plan: planEnum("plan").notNull().default("GROWTH"),
+  minutesIncluded: integer("minutes_included"), // null = plan default
+  overageCentsPerMin: integer("overage_cents_per_min").notNull().default(15),
+  billingStatus: billingStatusEnum("billing_status").notNull().default("TRIAL"),
+  billingEmail: text("billing_email"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  usageAlertPeriod: text("usage_alert_period"), // "YYYY-MM" when the 80% alert was sent
+  // Practice management software (PMS) sync
+  pmsType: pmsTypeEnum("pms_type").notNull().default("NONE"),
+  pmsCustomerKeyEnc: text("pms_customer_key_enc"),
+  pmsClinicNum: integer("pms_clinic_num"), // Open Dental ClinicNum (multi-location offices), optional
+  pmsOperatoryNum: integer("pms_operatory_num"), // operatory new AI bookings go into
+  pmsProviderMap: jsonb("pms_provider_map").$type<Record<string, number>>().notNull().default({}), // our providerId -> ProvNum
+  pmsLastSyncAt: timestamp("pms_last_sync_at", { withTimezone: true }),
+  pmsSyncError: text("pms_sync_error"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -80,6 +104,11 @@ export const users = pgTable("users", {
   totpEnabled: boolean("totp_enabled").notNull().default(false),
   active: boolean("active").notNull().default(true),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  // Security: bumping tokenVersion instantly invalidates every access token for this user
+  tokenVersion: integer("token_version").notNull().default(0),
+  failedLogins: integer("failed_logins").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -130,6 +159,15 @@ export const patients = pgTable("patients", {
   smsConsent: boolean("sms_consent").notNull().default(false),
   callConsent: boolean("call_consent").notNull().default(false),
   smsOptOut: boolean("sms_opt_out").notNull().default(false),
+  // Automated-call consent record (TCPA): when and how it was given, and opt-outs
+  callConsentAt: timestamp("call_consent_at", { withTimezone: true }),
+  callConsentSource: text("call_consent_source"), // AI_CALL, STAFF, FORM, SMS
+  callOptOut: boolean("call_opt_out").notNull().default(false),
+  // Identity check on calls. Only an HMAC of the date of birth is searchable; the value itself is encrypted.
+  dobHash: text("dob_hash"),
+  dobEnc: text("dob_enc"),
+  insuranceEnc: text("insurance_enc"), // "Carrier / member name" as the caller said it
+  pmsPatNum: integer("pms_pat_num"),
   notesEnc: text("notes_enc"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -150,6 +188,9 @@ export const appointments = pgTable("appointments", {
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
   rescheduledFromId: text("rescheduled_from_id"),
+  pmsAptNum: integer("pms_apt_num"),
+  pmsSyncedAt: timestamp("pms_synced_at", { withTimezone: true }),
+  pmsError: text("pms_error"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("appointments_clinic_start").on(t.clinicId, t.startAt)]);
@@ -171,6 +212,10 @@ export const calls = pgTable("calls", {
   outcome: text("outcome"), // BOOKED, RESCHEDULED, CANCELLED, INFO, LEAD, TRANSFERRED, FEEDBACK, NO_ANSWER
   summaryEnc: text("summary_enc"),
   transcriptEnc: text("transcript_enc"),
+  // Caller identity check (needed before the AI reads out or changes an existing appointment)
+  verifiedPatientId: text("verified_patient_id"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  verifyAttempts: integer("verify_attempts").notNull().default(0),
 }, (t) => [index("calls_clinic_started").on(t.clinicId, t.startedAt)]);
 
 /** CRM contact / deal. Every AI inquiry lands here. */
@@ -280,6 +325,40 @@ export const auditLogs = pgTable("audit_logs", {
   meta: jsonb("meta"),
   createdAt: createdAt(),
 }, (t) => [index("audit_clinic_created").on(t.clinicId, t.createdAt)]);
+
+/** Extra phone numbers (Pro plan: second location, Spanish line, marketing number). */
+export const clinicNumbers = pgTable("clinic_numbers", {
+  id: id(),
+  clinicId: text("clinic_id").notNull().references(() => clinics.id),
+  number: text("number").notNull().unique(), // E.164
+  label: text("label"),
+  createdAt: createdAt(),
+});
+
+/** Busy times pulled from the clinic's PMS (Open Dental) so the AI never double-books. No patient data stored. */
+export const pmsBusyBlocks = pgTable("pms_busy_blocks", {
+  id: id(),
+  clinicId: text("clinic_id").notNull().references(() => clinics.id),
+  pmsAptNum: integer("pms_apt_num").notNull(),
+  providerId: text("provider_id"), // mapped from ProvNum; null = blocks every provider
+  startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+  endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("pms_busy_clinic_apt").on(t.clinicId, t.pmsAptNum), index("pms_busy_clinic_start").on(t.clinicId, t.startAt)]);
+
+/** One row per clinic per month: minutes used, overage billed. */
+export const usagePeriods = pgTable("usage_periods", {
+  id: id(),
+  clinicId: text("clinic_id").notNull().references(() => clinics.id),
+  period: text("period").notNull(), // YYYY-MM (clinic local)
+  minutes: integer("minutes").notNull().default(0),
+  includedMinutes: integer("included_minutes").notNull().default(0),
+  overageMinutes: integer("overage_minutes").notNull().default(0),
+  overageCents: integer("overage_cents").notNull().default(0),
+  invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
+  stripeInvoiceItemId: text("stripe_invoice_item_id"),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("usage_clinic_period").on(t.clinicId, t.period)]);
 
 export type Clinic = typeof clinics.$inferSelect;
 export type User = typeof users.$inferSelect;

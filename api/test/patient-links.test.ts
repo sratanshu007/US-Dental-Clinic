@@ -158,7 +158,7 @@ test("expired links stop working", async () => {
 });
 
 test("patient without a last name gets the first-name question", async () => {
-  const [p2] = await db.insert(schema.patients).values({ clinicId: clinic.id, phone: PHONE.replace(/.$/, "9"), firstName: "Sam", smsConsent: true }).returning();
+  const [p2] = await db.insert(schema.patients).values({ clinicId: clinic.id, phone: `+1210554${String(Math.floor(Math.random() * 9000) + 1000)}`, firstName: "Sam", smsConsent: true }).returning();
   const t = tokenOf(await createPatientLink(clinic, p2, null, "BOOKED"));
   assert.equal((await req("GET", `/p/${t}/info`)).json.question.kind, "first_name");
   const ok = await req("POST", `/p/${t}/verify`, { answer: "sam" });

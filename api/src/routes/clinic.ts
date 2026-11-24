@@ -9,12 +9,16 @@ import { audit } from "../lib/audit";
 import { decrypt, encrypt } from "../lib/crypto";
 import { ah, badRequest, notFound } from "../lib/http";
 import { normalizeUsPhone } from "../lib/phone";
+import { dobHash, normalizeDob } from "../lib/identity";
+import { newPassword, passwordProblem } from "../lib/password";
+import { revokeAllSessions } from "./auth";
+import { planOf } from "../services/plans";
+import { planView } from "../middleware/plan";
 import { clinicScope, requireAuth, requireRole } from "../middleware/auth";
 import { dailySummary, rangeSummary } from "../services/reports";
 import {
   bookAppointment, findNextSlots, getAvailability, getClinic, setAppointmentStatus, upsertPatient,
 } from "../services/scheduling";
-import { syncPlivoNumber } from "../services/sms";
 import { publicUser } from "./auth";
 
 export const clinicRouter = Router();
@@ -27,6 +31,8 @@ const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
 const patientView = (p: typeof schema.patients.$inferSelect) => ({
   id: p.id, phone: p.phone, firstName: p.firstName, lastName: p.lastName, email: p.email, isNew: p.isNew,
   smsConsent: p.smsConsent, callConsent: p.callConsent, smsOptOut: p.smsOptOut, createdAt: p.createdAt,
+  callOptOut: p.callOptOut, callConsentAt: p.callConsentAt, callConsentSource: p.callConsentSource,
+  dateOfBirth: decrypt(p.dobEnc), insurance: decrypt(p.insuranceEnc), pmsPatNum: p.pmsPatNum,
 });
 
 // ---------------- Dashboard ----------------
@@ -34,36 +40,60 @@ const patientView = (p: typeof schema.patients.$inferSelect) => ({
 clinicRouter.get("/dashboard", ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const clinic = await getClinic(clinicId);
-  const today = await dailySummary(clinicId);
   const now = new Date();
-  const upcoming = await db.query.appointments.findMany({
-    where: and(
-      eq(schema.appointments.clinicId, clinicId),
-      gte(schema.appointments.startAt, now),
-      inArray(schema.appointments.status, ["BOOKED", "CONFIRMED"]),
-    ),
-    with: { patient: true, provider: true, service: true },
-    orderBy: asc(schema.appointments.startAt),
-    limit: 8,
-  });
-  const [{ n: openLeads }] = await db
-    .select({ n: count() })
-    .from(schema.leads)
-    .where(and(eq(schema.leads.clinicId, clinicId), eq(schema.leads.status, "NEW")));
-  const last7 = await rangeSummary(
-    clinicId,
-    DateTime.now().setZone(clinic.timezone).minus({ days: 6 }).toISODate()!,
-    DateTime.now().setZone(clinic.timezone).toISODate()!,
-  );
-  const [crm] = await db.select({
-    pipeline: sql<number>`coalesce(sum(${schema.leads.value}) filter (where ${schema.leads.status} not in ('WON','LOST')),0)::int`,
-  }).from(schema.leads).where(eq(schema.leads.clinicId, clinicId));
-  const [tasks] = await db.select({
-    due: sql<number>`count(*) filter (where ${schema.crmTasks.dueAt} <= ${DateTime.now().setZone(clinic.timezone).endOf("day").toJSDate()})::int`,
-    overdue: sql<number>`count(*) filter (where ${schema.crmTasks.dueAt} < ${new Date()})::int`,
-  }).from(schema.crmTasks).where(and(eq(schema.crmTasks.clinicId, clinicId), isNull(schema.crmTasks.doneAt)));
+  const from7 = DateTime.now().setZone(clinic.timezone).minus({ days: 6 }).toISODate()!;
+  const to7 = DateTime.now().setZone(clinic.timezone).toISODate()!;
+
+  const [
+    today,
+    upcoming,
+    leadsResult,
+    last7,
+    crmResult,
+    tasksResult,
+  ] = await Promise.all([
+    dailySummary(clinicId, undefined, clinic),
+    db.query.appointments.findMany({
+      where: and(
+        eq(schema.appointments.clinicId, clinicId),
+        gte(schema.appointments.startAt, now),
+        inArray(schema.appointments.status, ["BOOKED", "CONFIRMED"]),
+      ),
+      with: { patient: true, provider: true, service: true },
+      orderBy: asc(schema.appointments.startAt),
+      limit: 8,
+    }),
+    db
+      .select({ n: count() })
+      .from(schema.leads)
+      .where(and(eq(schema.leads.clinicId, clinicId), eq(schema.leads.status, "NEW"))),
+    rangeSummary(clinicId, from7, to7, clinic),
+    db
+      .select({
+        pipeline: sql<number>`coalesce(sum(${schema.leads.value}) filter (where ${schema.leads.status} not in ('WON','LOST')),0)::int`,
+      })
+      .from(schema.leads)
+      .where(eq(schema.leads.clinicId, clinicId)),
+    db
+      .select({
+        due: sql<number>`count(*) filter (where ${schema.crmTasks.dueAt} <= ${DateTime.now().setZone(clinic.timezone).endOf("day").toJSDate()})::int`,
+        overdue: sql<number>`count(*) filter (where ${schema.crmTasks.dueAt} < ${new Date()})::int`,
+      })
+      .from(schema.crmTasks)
+      .where(and(eq(schema.crmTasks.clinicId, clinicId), isNull(schema.crmTasks.doneAt))),
+  ]);
+
+  const openLeads = leadsResult[0]?.n ?? 0;
+  const crm = crmResult[0] ?? { pipeline: 0 };
+  const tasks = tasksResult[0] ?? { due: 0, overdue: 0 };
+
   res.json({
-    clinic: { id: clinic.id, name: clinic.name, timezone: clinic.timezone }, today, upcoming: upcoming.map(apptView), openLeads: Number(openLeads), last7,
+    clinic: { id: clinic.id, name: clinic.name, timezone: clinic.timezone },
+    plan: planView(clinic),
+    today,
+    upcoming: upcoming.map(apptView),
+    openLeads: Number(openLeads),
+    last7,
     crm: { openPipeline: crm.pipeline, tasksDue: tasks.due, tasksOverdue: tasks.overdue },
   });
 }));
@@ -134,8 +164,10 @@ clinicRouter.post("/appointments", ah(async (req, res) => {
   const b = z.object({
     phone: z.string(), firstName: z.string().optional(), lastName: z.string().optional(), email: z.string().email().optional(),
     startAt: z.string(), serviceId: z.string().optional(), providerId: z.string().optional(), reason: z.string().max(200).optional(),
-    smsConsent: z.boolean().optional(), callConsent: z.boolean().optional(),
+    smsConsent: z.boolean().optional(), callConsent: z.boolean().optional(), dateOfBirth: z.string().optional(),
+    insurance: z.string().max(200).optional(),
   }).parse(req.body);
+  if (b.dateOfBirth && !normalizeDob(b.dateOfBirth)) throw badRequest("Invalid date of birth");
   const phone = normalizeUsPhone(b.phone);
   if (!phone) throw badRequest("Invalid phone number");
   const appt = await bookAppointment({ ...b, clinicId, patientPhone: phone, source: "STAFF" });
@@ -233,11 +265,23 @@ clinicRouter.patch("/patients/:id", ah(async (req, res) => {
   const b = z.object({
     firstName: z.string().optional(), lastName: z.string().optional(), email: z.string().email().nullable().optional(),
     smsConsent: z.boolean().optional(), callConsent: z.boolean().optional(), smsOptOut: z.boolean().optional(), notes: z.string().nullable().optional(),
+    callOptOut: z.boolean().optional(), dateOfBirth: z.string().nullable().optional(), insurance: z.string().max(200).nullable().optional(),
   }).parse(req.body);
-  const { notes, ...rest } = b;
+  const { notes, dateOfBirth, insurance, ...rest } = b;
+  const extra: Partial<typeof schema.patients.$inferInsert> = {};
+  if (dateOfBirth !== undefined) {
+    // Staff can set or correct the DOB used for the phone identity check
+    const dob = dateOfBirth === null ? null : normalizeDob(dateOfBirth);
+    if (dateOfBirth !== null && !dob) throw badRequest("Invalid date of birth");
+    extra.dobHash = dob ? dobHash(dob) : null;
+    extra.dobEnc = dob ? encrypt(dob) : null;
+  }
+  if (insurance !== undefined) extra.insuranceEnc = encrypt(insurance);
+  if (rest.callConsent === true) { extra.callConsentAt = new Date(); extra.callConsentSource = "STAFF"; extra.callOptOut = false; }
+  if (rest.callOptOut === true) rest.callConsent = false;
   const [p] = await db
     .update(schema.patients)
-    .set({ ...rest, ...(notes !== undefined ? { notesEnc: encrypt(notes) } : {}) })
+    .set({ ...rest, ...extra, ...(notes !== undefined ? { notesEnc: encrypt(notes) } : {}) })
     .where(and(eq(schema.patients.id, req.params.id), eq(schema.patients.clinicId, clinicId)))
     .returning();
   if (!p) throw notFound();
@@ -388,12 +432,18 @@ clinicRouter.post("/notifications/read-all", ah(async (req, res) => {
 
 // ---------------- Settings (owner) ----------------
 
+/** Clinic row for the browser: never send secrets (PMS customer key). */
+const clinicView = (c: typeof schema.clinics.$inferSelect) => {
+  const { pmsCustomerKeyEnc, ...rest } = c;
+  return { ...rest, pmsConnected: !!pmsCustomerKeyEnc, features: planOf(c) };
+};
+
 clinicRouter.get("/settings", ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const clinic = await getClinic(clinicId);
   const providers = await db.query.providers.findMany({ where: eq(schema.providers.clinicId, clinicId), orderBy: asc(schema.providers.name) });
   const services = await db.query.services.findMany({ where: eq(schema.services.clinicId, clinicId), orderBy: asc(schema.services.name) });
-  res.json({ clinic, providers, services });
+  res.json({ clinic: clinicView(clinic), providers, services });
 }));
 
 const hoursSchema = z.record(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]), z.array(z.tuple([hhmm, hhmm])));
@@ -402,7 +452,6 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const b = z.object({
     name: z.string().min(2).optional(),
-    aiPhoneNumber: z.string().optional(),
     transferNumber: z.string().nullable().optional(),
     timezone: z.string().optional(),
     address: z.string().nullable().optional(),
@@ -414,6 +463,7 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
     aiExtraInstructions: z.string().max(4000).nullable().optional(),
     smsEnabled: z.boolean().optional(),
     smsStyle: z.enum(["FULL", "LINK"]).optional(),
+    smsOnlyBooked: z.boolean().optional(),
     reminderHoursBefore: z.number().int().min(1).max(168).optional(),
     noShowFollowUp: z.boolean().optional(),
     noShowDelayMinutes: z.number().int().min(0).max(4320).optional(),
@@ -427,36 +477,25 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
     taskDigestTime: hhmm.optional(),
     retentionDays: z.number().int().min(7).max(3650).optional(),
   }).parse(req.body);
-  if (b.aiPhoneNumber) {
-    const p = normalizeUsPhone(b.aiPhoneNumber);
-    if (!p) throw badRequest("Invalid AI phone number");
-    b.aiPhoneNumber = p;
-    void syncPlivoNumber(p);
-  }
   if (b.transferNumber) {
     const t = normalizeUsPhone(b.transferNumber);
     if (!t) throw badRequest("Invalid transfer number");
     b.transferNumber = t;
   }
   if (b.timezone && !DateTime.now().setZone(b.timezone).isValid) throw badRequest("Invalid timezone");
-  let clinic;
-  try {
-    [clinic] = await db.update(schema.clinics).set(b as any).where(eq(schema.clinics.id, clinicId)).returning();
-  } catch (err: any) {
-    console.error("[settings:update] error:", err);
-    if (err?.code === "23505" || err?.message?.includes("unique")) {
-      throw badRequest("This AI phone number is already assigned to another clinic");
-    }
-    throw badRequest(err?.message || "Failed to update settings");
-  }
-  if (!clinic) throw notFound("Clinic not found");
+  const [clinic] = await db.update(schema.clinics).set(b as any).where(eq(schema.clinics.id, clinicId)).returning();
   await audit(req, { action: "UPDATE_SETTINGS", clinicId, meta: { fields: Object.keys(b) } });
-  res.json(clinic);
+  res.json(clinicView(clinic));
 }));
 
 clinicRouter.post("/providers", ownerOnly, ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const b = z.object({ name: z.string().min(1), title: z.string().optional() }).parse(req.body);
+  const max = planOf(await getClinic(clinicId)).maxProviders;
+  if (max !== null) {
+    const [{ n }] = await db.select({ n: count() }).from(schema.providers).where(and(eq(schema.providers.clinicId, clinicId), eq(schema.providers.active, true)));
+    if (Number(n) >= max) throw badRequest(`Your plan includes up to ${max} dentists. Upgrade to add more.`);
+  }
   const [p] = await db.insert(schema.providers).values({ clinicId, ...b }).returning();
   res.status(201).json(p);
 }));
@@ -500,8 +539,10 @@ clinicRouter.get("/team", ownerOnly, ah(async (req, res) => {
 clinicRouter.post("/team", ownerOnly, ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const b = z.object({
-    email: z.string().email(), name: z.string().min(1), password: z.string().min(10), role: z.enum(["CLINIC_OWNER", "CLINIC_STAFF"]),
+    email: z.string().email().max(200), name: z.string().min(1).max(100), password: newPassword, role: z.enum(["CLINIC_OWNER", "CLINIC_STAFF"]),
   }).parse(req.body);
+  const weak = passwordProblem(b.password, { email: b.email, name: b.name });
+  if (weak) throw badRequest(weak);
   const [u] = await db.insert(schema.users).values({
     clinicId, email: b.email.toLowerCase(), name: b.name, role: b.role, passwordHash: await bcrypt.hash(b.password, 12),
   }).returning();
@@ -516,7 +557,8 @@ clinicRouter.patch("/team/:id", ownerOnly, ah(async (req, res) => {
   const [u] = await db.update(schema.users).set(b)
     .where(and(eq(schema.users.id, req.params.id), eq(schema.users.clinicId, clinicId))).returning();
   if (!u) throw notFound();
-  if (b.active === false) await db.update(schema.sessions).set({ revokedAt: new Date() }).where(eq(schema.sessions.userId, u.id));
+  // Disabling or changing the role signs the person out everywhere immediately
+  if (b.active === false || b.role) await revokeAllSessions(u.id);
   await audit(req, { action: "UPDATE_USER", entity: "user", entityId: u.id, clinicId, meta: b });
   res.json(publicUser(u));
 }));

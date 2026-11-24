@@ -1,7 +1,7 @@
 // Plivo webhooks: incoming SMS replies (confirm, opt-out, feedback) and delivery reports.
 import { Router, type Request } from "express";
 import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
-import * as plivo from "plivo";
+import { validateV3Signature } from "../lib/plivo";
 import { config } from "../config";
 import { db, schema } from "../db";
 import { audit } from "../lib/audit";
@@ -22,7 +22,7 @@ function verifyPlivo(req: Request) {
   const nonce = req.headers["x-plivo-signature-v3-nonce"] as string | undefined;
   if (!sig || !nonce) throw new HttpError(401, "Missing Plivo signature");
   const url = `${config.publicApiUrl}${req.originalUrl}`;
-  const ok = plivo.validateV3Signature(req.method, url, nonce, config.plivo.authToken, sig, req.body ?? {});
+  const ok = validateV3Signature(req.method, url, nonce, config.plivo.authToken, sig, (req.body ?? {}) as Record<string, string>);
   if (!ok) throw new HttpError(401, "Bad Plivo signature");
 }
 

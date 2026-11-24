@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, fmtPhone } from "@/lib/api";
@@ -22,6 +23,18 @@ function Crm() {
   const refreshAll = () => summary.reload();
 
   const s = summary.data;
+  if (summary.error && /Growth and Pro/.test(String(summary.error))) {
+    return (
+      <>
+        <div className="page-head"><div><h1>CRM</h1></div></div>
+        <div className="card" style={{ maxWidth: 560 }}>
+          <h2 style={{ marginTop: 0 }}>🔒 The CRM is part of Growth and Pro</h2>
+          <p className="muted">Every caller who isn&apos;t ready to book becomes a lead with follow-up tasks, a pipeline and reminders — so price shoppers turn into patients. Growth also adds no-show rebooking and feedback calls.</p>
+          <Link className="btn primary" href="/settings?tab=plan">See plans</Link>
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <div className="page-head">

@@ -13,13 +13,13 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (p) setForm({ firstName: p.firstName ?? "", lastName: p.lastName ?? "", email: p.email ?? "", notes: p.notes ?? "", smsConsent: p.smsConsent, callConsent: p.callConsent, smsOptOut: p.smsOptOut });
+    if (p) setForm({ firstName: p.firstName ?? "", lastName: p.lastName ?? "", email: p.email ?? "", notes: p.notes ?? "", smsConsent: p.smsConsent, callConsent: p.callConsent, smsOptOut: p.smsOptOut, callOptOut: p.callOptOut, dateOfBirth: p.dateOfBirth ?? "", insurance: p.insurance ?? "" });
   }, [p]);
 
   async function save() {
     setErr(null);
     try {
-      await api(`/api/patients/${id}`, { method: "PATCH", body: { ...form, email: form.email || null } });
+      await api(`/api/patients/${id}`, { method: "PATCH", body: { ...form, email: form.email || null, dateOfBirth: form.dateOfBirth || null, insurance: form.insurance || null } });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       reload();
@@ -48,12 +48,22 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
             <div className="field"><label>First name</label><input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
             <div className="field"><label>Last name</label><input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
           </div>
+          <div className="grid k2">
+            <div className="field">
+              <label>Date of birth (used to verify callers)</label>
+              <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} />
+            </div>
+            <div className="field"><label>Insurance (as the patient said it)</label><input value={form.insurance} onChange={(e) => setForm({ ...form, insurance: e.target.value })} placeholder="Delta Dental, member Jane Doe" /></div>
+          </div>
           <div className="field"><label>Email</label><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
           <div className="field"><label>Private notes (encrypted)</label><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
           <div className="field">
             <label className="check"><input type="checkbox" checked={form.smsConsent} onChange={(e) => setForm({ ...form, smsConsent: e.target.checked })} /> Agreed to appointment texts</label>
             <label className="check"><input type="checkbox" checked={form.callConsent} onChange={(e) => setForm({ ...form, callConsent: e.target.checked })} /> Agreed to automated calls (no-show / feedback)</label>
             <label className="check"><input type="checkbox" checked={form.smsOptOut} onChange={(e) => setForm({ ...form, smsOptOut: e.target.checked })} /> Opted out of texts (replied STOP)</label>
+            <label className="check"><input type="checkbox" checked={form.callOptOut} onChange={(e) => setForm({ ...form, callOptOut: e.target.checked, callConsent: e.target.checked ? false : form.callConsent })} /> Asked not to be called (automated calls stop)</label>
+            {p.callConsentAt && <div className="small muted">Call consent given {fmtDateTime(p.callConsentAt)} via {String(p.callConsentSource ?? "").replace("_", " ").toLowerCase()}</div>}
+            {p.pmsPatNum && <div className="small muted">Open Dental patient #{p.pmsPatNum}</div>}
           </div>
           <button className="primary" onClick={save}>Save</button>
         </div>

@@ -14,8 +14,14 @@ export const config = {
   jwtSecret: required("JWT_SECRET"),
   // 64 hex chars = 32 bytes, used for AES-256-GCM field encryption
   encryptionKey: required("ENCRYPTION_KEY"),
-  // Shared secret between this API and the Python voice agent
+  // Shared secret between this API and the voice agent
   internalApiKey: required("INTERNAL_API_KEY"),
+  // Optional: only accept /internal calls from these IPs (comma-separated), e.g. the voice container
+  internalAllowedIps: (process.env.INTERNAL_ALLOWED_IPS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  requireAdminMfa: (process.env.REQUIRE_ADMIN_MFA ?? (process.env.NODE_ENV === "production" ? "true" : "false")) === "true",
+  // Account lockout after repeated wrong passwords
+  maxFailedLogins: Number(process.env.MAX_FAILED_LOGINS ?? 5),
+  lockoutMinutes: Number(process.env.LOCKOUT_MINUTES ?? 15),
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",").map((s) => s.trim()),
   publicApiUrl: process.env.PUBLIC_API_URL ?? "http://localhost:4000",
   // Public base URL for secure patient links in texts, e.g. https://dd-care.com (proxied to this API).
@@ -29,21 +35,30 @@ export const config = {
     // Keep this on unless you have a BAA with Plivo and need its message logs for debugging.
     redactSms: process.env.PLIVO_REDACT_SMS !== "false",
   },
-  accessTokenMinutes: Number(process.env.ACCESS_TOKEN_MINUTES ?? 60),
+  openDental: {
+    apiUrl: process.env.OPEN_DENTAL_API_URL ?? "https://api.opendental.com/api/v1",
+    // Ours, from Open Dental's Developer Portal (vendor.relations@opendental.com). Each office adds its own customer key.
+    developerKey: process.env.OPEN_DENTAL_DEVELOPER_KEY ?? "",
+  },
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY ?? "",
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    // Price IDs from the Stripe dashboard (recurring monthly, USD)
+    prices: {
+      STARTER: process.env.STRIPE_PRICE_STARTER ?? "",
+      GROWTH: process.env.STRIPE_PRICE_GROWTH ?? "",
+      PRO: process.env.STRIPE_PRICE_PRO ?? "",
+      SETUP_STANDARD: process.env.STRIPE_PRICE_SETUP_STANDARD ?? "",
+      SETUP_PREMIUM: process.env.STRIPE_PRICE_SETUP_PREMIUM ?? "",
+    },
+  },
+  // Operations alerts (Slack/Discord/Teams incoming webhook). Messages never contain patient data.
+  alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? "",
+  webAppUrl: (process.env.WEB_APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
+  accessTokenMinutes: Number(process.env.ACCESS_TOKEN_MINUTES ?? 15),
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7),
   // Turn background jobs off for one-off scripts / tests
   jobsEnabled: process.env.JOBS_ENABLED !== "false",
   // When true, SMS and outbound calls are logged instead of sent (local dev / demos)
   dryRun: process.env.DRY_RUN === "true" || !process.env.PLIVO_AUTH_ID,
-
-  // Login credentials & Clinic info (strictly configured via environment variables)
-  adminEmail: (process.env.ADMIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "").toLowerCase(),
-  adminPassword: process.env.ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "",
-  ownerEmail: (process.env.OWNER_EMAIL ?? process.env.SEED_OWNER_EMAIL ?? "").toLowerCase(),
-  ownerPassword: process.env.OWNER_PASSWORD ?? process.env.SEED_OWNER_PASSWORD ?? "",
-  clinicName: process.env.CLINIC_NAME ?? process.env.SEED_CLINIC_NAME ?? "",
-  clinicPhone: process.env.CLINIC_PHONE ?? process.env.SEED_CLINIC_NUMBER ?? "",
-  clinicTransferPhone: process.env.CLINIC_TRANSFER_PHONE ?? "",
-  clinicTimezone: process.env.CLINIC_TIMEZONE ?? "America/Chicago",
-  clinicAddress: process.env.CLINIC_ADDRESS ?? "",
 };

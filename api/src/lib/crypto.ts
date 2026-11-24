@@ -1,11 +1,8 @@
 import crypto from "node:crypto";
 import { config } from "../config";
 
-let rawKeyBuf = Buffer.from(config.encryptionKey, "hex");
-if (rawKeyBuf.length !== 32 || !/^[0-9a-fA-F]{64}$/.test(config.encryptionKey)) {
-  rawKeyBuf = crypto.createHash("sha256").update(config.encryptionKey).digest();
-}
-const KEY = rawKeyBuf;
+const KEY = Buffer.from(config.encryptionKey, "hex");
+if (KEY.length !== 32) throw new Error("ENCRYPTION_KEY must be 64 hex characters (32 bytes)");
 
 /** AES-256-GCM. Output: "v1:<iv b64>:<tag b64>:<ciphertext b64>" */
 export function encrypt(plain: string | null | undefined): string | null {

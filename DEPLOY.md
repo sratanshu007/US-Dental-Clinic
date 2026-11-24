@@ -7,6 +7,11 @@ the mobile app in the stores, and a Plivo number answering calls.
 > and your cloud host, and host on HIPAA-eligible services. For Plivo either sign its Enterprise BAA or use
 > transport-only mode (section 6) after your attorney confirms it. Until then use test numbers and fake data.
 
+> **Production hosting:** use AWS (signs a BAA). Follow [`deploy/aws/AWS-SETUP.md`](deploy/aws/AWS-SETUP.md) — it replaces
+> sections 1–4 below with EC2 + encrypted RDS + S3 backups + monitoring. Hostinger has no BAA: use it only for demos with fake data.
+
+> **Security checklist:** read [`SECURITY.md`](SECURITY.md) section 7 before going live. In production the API refuses to start with weak secrets, and admin pages need 2FA.
+
 ## 0. What you need
 
 | Item | Notes |
@@ -179,5 +184,45 @@ docker compose up -d --build     # migrations run automatically
 
 ## Backups
 
-- Database: enable automated snapshots (RDS) or `pg_dump` nightly to encrypted storage.
+- Database: RDS automated backups (14 days) **plus** `deploy/aws/backup.sh` nightly to an encrypted S3 bucket. Test a restore every 3 months with `deploy/aws/restore.sh`.
 - `ENCRYPTION_KEY` and `.env` files: keep a copy in a secrets manager. Without the key, encrypted fields can't be read.
+
+## Monitoring and alerts
+
+- `GET /ready` on the API (checks the database) and on the voice agent (checks the API and keys). Point an uptime monitor at both, every minute.
+- `ALERT_WEBHOOK_URL` (Slack/Discord): background-job failures, 500 errors, crashes, failed backups, failed payments, Open Dental sync errors. Alerts never contain patient data.
+- Load test before go-live: `cd api && INTERNAL_API_KEY=... API=https://api.yourdomain.com CLINIC_NUMBER=+1... npx tsx scripts/loadtest.ts 20`.
+
+## Caller identity check and consent (built in)
+
+- Before the AI reads out, confirms, moves or cancels an appointment, the caller must give the **first name + date of birth** on file
+  (or last name for patients with no DOB yet). 3 wrong answers lock the call and alert the clinic. Unverified callers can still book
+  a new visit but can't rename an existing record.
+- New patients are asked for their DOB when booking. Staff can add or fix a DOB on the patient page.
+- Every call starts with "This is the clinic's AI assistant, and this call may be transcribed…", and outbound calls say they are automated.
+- The AI asks before booking whether texts **and calls (some automated)** are OK, and records when and how consent was given.
+  "Stop calling me" on any call opts the patient out of automated calls immediately.
+
+## Plans and billing
+
+- Each clinic has a plan (Starter / Growth / Pro). The plan decides minutes, dentists, extra numbers, and whether no-show calls,
+  feedback calls, CRM and Open Dental sync are on. Change it in the super-admin page.
+- **Manual billing** (default, status TRIAL/MANUAL): usage is tracked per month; invoice overage yourself and mark the month invoiced
+  (`POST /admin/clinics/:id/usage/:period/invoiced`).
+- **Stripe** (optional): create 3 monthly prices + 2 one-time setup prices in Stripe, put their IDs and keys in `api/.env`, and add a
+  webhook endpoint `https://api.<domain>/webhooks/stripe` for `checkout.session.completed`, `customer.subscription.updated`,
+  `customer.subscription.deleted`, `invoice.payment_failed`. Owners then pay from Settings → Plan & billing; overage is added to the next
+  invoice automatically. Note: Stripe is invite-only for India-registered companies — request an invite, or bill through a US entity
+  (e.g. Stripe Atlas LLC), or stay on manual invoicing.
+- Status CANCELED turns the AI line off; PAST_DUE keeps it on and asks the owner to update the card.
+
+## Open Dental sync (Growth / Pro)
+
+1. Email vendor.relations@opendental.com for Developer Portal access; put your developer key in `OPEN_DENTAL_DEVELOPER_KEY`.
+2. Sign a BAA with the clinic first (Open Dental recommends it). In the Developer Portal, create a customer key for the office;
+   the office enables it in Open Dental (Setup → Advanced Setup → API) and keeps the eConnector running.
+3. In the clinic's Settings → Practice software: paste the customer key, **Test connection**, pick the operatory for AI bookings,
+   match each dentist to an Open Dental provider, **Save**, **Sync now**.
+4. Every 5 minutes the API pulls scheduled appointment times (no patient data stored) and blocks them; every AI booking,
+   reschedule and cancellation is written to Open Dental (patient matched by name + DOB or created). Failures retry automatically and show
+   in Settings and the alerts channel.

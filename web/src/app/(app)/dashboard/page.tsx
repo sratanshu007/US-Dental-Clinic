@@ -15,7 +15,8 @@ export default function Dashboard() {
   const [prov, setProv] = useState("");
   if (loading && !data) return <Loading />;
   if (!data) return <ErrorBox error={error} />;
-  const { today, last7, clinic, openLeads, crm } = data;
+  const { today, last7, clinic, openLeads, crm, plan } = data;
+  const crmOn = plan?.features?.crm !== false;
   const dentists = [...new Map(data.upcoming.filter((a: any) => a.provider).map((a: any) => [a.provider.id, a.provider.name])).entries()] as [string, string][];
   const upcoming = data.upcoming.filter((a: any) => !prov || a.provider?.id === prov);
   const max = Math.max(1, ...last7.map((d: any) => d.scheduled));
@@ -34,7 +35,11 @@ export default function Dashboard() {
         <div className="card stat"><div className="label">Booked by AI today</div><div className="value">{today.newBookingsByAi}</div><div className="hint">{today.callsHandled} calls handled</div></div>
         <div className="card stat"><div className="label">Patients came</div><div className="value" style={{ color: "var(--green)" }}>{today.showed}</div><div className="hint">of {today.scheduled} scheduled today</div></div>
         <div className="card stat"><div className="label">No-shows</div><div className="value" style={{ color: "var(--red)" }}>{today.noShow}</div><div className="hint">{today.unmarked} not marked yet</div></div>
-        <Link href="/crm" className="card stat" style={{ color: "inherit", textDecoration: "none" }}><div className="label">CRM pipeline</div><div className="value">{money(crm.openPipeline)}</div><div className="hint">{openLeads} new inquiries · {crm.tasksDue} follow-ups due{crm.tasksOverdue ? ` (${crm.tasksOverdue} overdue)` : ""}</div></Link>
+        {crmOn ? (
+          <Link href="/crm" className="card stat" style={{ color: "inherit", textDecoration: "none" }}><div className="label">CRM pipeline</div><div className="value">{money(crm.openPipeline)}</div><div className="hint">{openLeads} new inquiries · {crm.tasksDue} follow-ups due{crm.tasksOverdue ? ` (${crm.tasksOverdue} overdue)` : ""}</div></Link>
+        ) : (
+          <Link href="/settings?tab=plan" className="card stat" style={{ color: "inherit", textDecoration: "none" }}><div className="label">Plan</div><div className="value" style={{ fontSize: 22 }}>{plan.name}</div><div className="hint">Upgrade to Growth for no-show rebooking, feedback calls and the CRM →</div></Link>
+        )}
       </div>
 
       <div className="grid k2">

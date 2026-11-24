@@ -2,11 +2,15 @@ import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { db, schema } from "../db";
 import type { Appointment, Clinic, Patient } from "../db/schema";
+import { encrypt } from "../lib/crypto";
 import { badRequest, HttpError, notFound } from "../lib/http";
+import { dobHash, normalizeDob } from "../lib/identity";
 import { nextCallingTime, openWindows, speakable } from "../lib/time";
 import { notifyClinic } from "./notify";
 import { sendSms } from "./sms";
 import { bookedText } from "./smsText";
+import { queuePmsPush } from "./pmsQueue";
+import { features } from "./plans";
 
 /** Statuses that occupy a slot on the calendar. */
 export const ACTIVE_STATUSES = ["BOOKED", "CONFIRMED", "SHOWED"] as const;
@@ -19,15 +23,18 @@ export interface Slot {
   providerName: string | null;
 }
 
-export async function getClinic(clinicId: string): Promise<Clinic> {
-  const c = await db.query.clinics.findFirst({ where: eq(schema.clinics.id, clinicId) });
+/** db or a transaction: queries inside a booking transaction must use the same connection (no pool deadlock). */
+export type Q = Pick<typeof db, "query" | "insert" | "update" | "delete" | "select" | "execute">;
+
+export async function getClinic(clinicId: string, q: Q = db): Promise<Clinic> {
+  const c = await q.query.clinics.findFirst({ where: eq(schema.clinics.id, clinicId) });
   if (!c) throw notFound("Clinic not found");
   return c;
 }
 
-async function serviceDuration(clinic: Clinic, serviceId?: string | null): Promise<number> {
+async function serviceDuration(clinic: Clinic, serviceId?: string | null, q: Q = db): Promise<number> {
   if (!serviceId) return clinic.slotMinutes;
-  const s = await db.query.services.findFirst({
+  const s = await q.query.services.findFirst({
     where: and(eq(schema.services.id, serviceId), eq(schema.services.clinicId, clinic.id)),
   });
   if (!s) throw badRequest("Unknown service");
@@ -43,24 +50,24 @@ export async function getAvailability(opts: {
   serviceId?: string | null;
   providerId?: string | null;
   excludeAppointmentId?: string;
-}): Promise<Slot[]> {
-  const clinic = await getClinic(opts.clinicId);
+}, q: Q = db): Promise<Slot[]> {
+  const clinic = await getClinic(opts.clinicId, q);
   const tz = clinic.timezone;
-  const duration = await serviceDuration(clinic, opts.serviceId);
+  const duration = await serviceDuration(clinic, opts.serviceId, q);
   const windows = openWindows(clinic.businessHours, opts.date, tz);
   if (!windows.length) return [];
 
   const dayStart = DateTime.fromISO(opts.date, { zone: tz }).startOf("day");
   const dayEnd = dayStart.plus({ days: 1 });
 
-  let providers = await db.query.providers.findMany({
+  let providers = await q.query.providers.findMany({
     where: and(eq(schema.providers.clinicId, clinic.id), eq(schema.providers.active, true)),
   });
   if (opts.providerId) providers = providers.filter((p) => p.id === opts.providerId);
   if (opts.providerId && !providers.length) throw badRequest("Unknown provider");
 
   const booked = (
-    await db.query.appointments.findMany({
+    await q.query.appointments.findMany({
       where: and(
         eq(schema.appointments.clinicId, clinic.id),
         inArray(schema.appointments.status, [...ACTIVE_STATUSES]),
@@ -68,7 +75,31 @@ export async function getAvailability(opts: {
         gte(schema.appointments.endAt, dayStart.toJSDate()),
       ),
     })
-  ).filter((a) => a.id !== opts.excludeAppointmentId);
+  ).filter((a) => a.id !== opts.excludeAppointmentId)
+    .map((a) => ({ id: a.id, providerId: a.providerId, startAt: a.startAt, endAt: a.endAt }));
+
+  // Busy times from the clinic's practice software (Open Dental). A null provider blocks everyone.
+  const pmsBusy = await q.query.pmsBusyBlocks.findMany({
+    where: and(
+      eq(schema.pmsBusyBlocks.clinicId, clinic.id),
+      lt(schema.pmsBusyBlocks.startAt, dayEnd.toJSDate()),
+      gte(schema.pmsBusyBlocks.endAt, dayStart.toJSDate()),
+    ),
+  });
+  // Our own bookings that were pushed to the PMS come back as busy blocks; don't count them twice.
+  const pushed = new Set((await q.query.appointments.findMany({
+    where: and(eq(schema.appointments.clinicId, clinic.id), lt(schema.appointments.startAt, dayEnd.toJSDate()), gte(schema.appointments.endAt, dayStart.toJSDate())),
+    columns: { pmsAptNum: true, id: true },
+  })).filter((a) => a.pmsAptNum !== null && a.id !== opts.excludeAppointmentId).map((a) => a.pmsAptNum));
+  const excludedAptNum = opts.excludeAppointmentId
+    ? (await q.query.appointments.findFirst({ where: eq(schema.appointments.id, opts.excludeAppointmentId), columns: { pmsAptNum: true } }))?.pmsAptNum ?? null
+    : null;
+  for (const b of pmsBusy) {
+    if (pushed.has(b.pmsAptNum) || b.pmsAptNum === excludedAptNum) continue;
+    booked.push({ id: `pms:${b.pmsAptNum}`, providerId: b.providerId, startAt: b.startAt, endAt: b.endAt });
+  }
+  const clashes = (providerId: string | null, start: Date, end: Date) =>
+    booked.some((a) => (a.providerId === null || providerId === null || a.providerId === providerId) && overlaps(start, end, a.startAt, a.endAt));
 
   const earliest = DateTime.now().plus({ minutes: 30 }); // don't offer slots starting in < 30 min
   const slots: Slot[] = [];
@@ -81,13 +112,13 @@ export async function getAvailability(opts: {
 
       if (providers.length === 0) {
         // No providers configured: one appointment at a time.
-        if (!booked.some((a) => overlaps(start, end, a.startAt, a.endAt))) {
+        if (!clashes(null, start, end)) {
           slots.push({ startAt: start.toISOString(), endAt: end.toISOString(), label: speakable(start, tz), providerId: null, providerName: null });
         }
         continue;
       }
       const free = providers.find(
-        (p) => !booked.some((a) => a.providerId === p.id && overlaps(start, end, a.startAt, a.endAt)),
+        (p) => !booked.some((a) => (a.providerId === p.id || a.providerId === null) && overlaps(start, end, a.startAt, a.endAt)),
       );
       if (free) {
         slots.push({ startAt: start.toISOString(), endAt: end.toISOString(), label: speakable(start, tz), providerId: free.id, providerName: free.name });
@@ -133,20 +164,36 @@ export async function findNextSlots(opts: {
 export async function upsertPatient(
   clinicId: string,
   phone: string,
-  data: Partial<Pick<Patient, "firstName" | "lastName" | "email" | "smsConsent" | "callConsent">> = {},
+  data: Partial<Pick<Patient, "firstName" | "lastName" | "email" | "smsConsent" | "callConsent">> & {
+    dateOfBirth?: string;
+    insurance?: string;
+    consentSource?: string;
+  } = {},
+  q: Q = db,
 ): Promise<Patient> {
-  const existing = await db.query.patients.findFirst({
+  const existing = await q.query.patients.findFirst({
     where: and(eq(schema.patients.clinicId, clinicId), eq(schema.patients.phone, phone)),
   });
-  const clean = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  const { dateOfBirth, insurance, consentSource, ...plain } = data;
+  const extra: Partial<Patient> = {};
+  const dob = normalizeDob(dateOfBirth);
+  // Never overwrite a DOB already on file from a phone call (that would let a caller re-key the identity check)
+  if (dob && !existing?.dobHash) { extra.dobHash = dobHash(dob); extra.dobEnc = encrypt(dob); }
+  if (insurance) extra.insuranceEnc = encrypt(insurance.slice(0, 200));
+  if (plain.callConsent === true) {
+    extra.callConsentAt = new Date();
+    extra.callConsentSource = consentSource ?? "STAFF";
+    extra.callOptOut = false;
+  }
+  const clean = { ...Object.fromEntries(Object.entries(plain).filter(([, v]) => v !== undefined && v !== null && v !== "")), ...extra };
   if (existing) {
     if (Object.keys(clean).length) {
-      const [p] = await db.update(schema.patients).set(clean).where(eq(schema.patients.id, existing.id)).returning();
+      const [p] = await q.update(schema.patients).set(clean).where(eq(schema.patients.id, existing.id)).returning();
       return p;
     }
     return existing;
   }
-  const [p] = await db.insert(schema.patients).values({ clinicId, phone, ...clean }).returning();
+  const [p] = await q.insert(schema.patients).values({ clinicId, phone, ...clean }).returning();
   return p;
 }
 
@@ -163,6 +210,8 @@ export interface BookInput {
   source: "AI_CALL" | "AI_OUTBOUND" | "SMS" | "STAFF";
   smsConsent?: boolean;
   callConsent?: boolean;
+  dateOfBirth?: string;
+  insurance?: string;
   rescheduledFromId?: string;
 }
 
@@ -181,7 +230,7 @@ export async function bookAppointment(input: BookInput): Promise<Appointment> {
       serviceId: input.serviceId,
       providerId: input.providerId,
       excludeAppointmentId: input.rescheduledFromId,
-    });
+    }, tx);
     const slot = free.find((s) => Date.parse(s.startAt) === start.toMillis());
     if (!slot) throw new HttpError(409, "That time is no longer available");
 
@@ -191,7 +240,10 @@ export async function bookAppointment(input: BookInput): Promise<Appointment> {
       email: input.email,
       smsConsent: input.smsConsent,
       callConsent: input.callConsent,
-    });
+      dateOfBirth: input.dateOfBirth,
+      insurance: input.insurance,
+      consentSource: input.source,
+    }, tx);
 
     if (input.rescheduledFromId) {
       await tx
@@ -229,6 +281,7 @@ export async function bookAppointment(input: BookInput): Promise<Appointment> {
     );
   }
   await sendSms(clinic, appt.patient, await bookedText(clinic, appt.patient, appt.created), "BOOKED");
+  queuePmsPush(clinic, appt.created.id, input.rescheduledFromId);
   return appt.created;
 }
 
@@ -258,9 +311,11 @@ export async function setAppointmentStatus(
     .returning();
 
   await cancelOpenTasks(appointmentId);
+  if (status === "CANCELLED") queuePmsPush(clinic, appointmentId);
   const now = DateTime.now().setZone(clinic.timezone);
+  const f = features(clinic);
 
-  if (status === "NO_SHOW" && clinic.noShowFollowUp) {
+  if (status === "NO_SHOW" && clinic.noShowFollowUp && f.noShowCalls) {
     const at = nextCallingTime(now.plus({ minutes: clinic.noShowDelayMinutes }), clinic.callingHoursStart, clinic.callingHoursEnd);
     await db.insert(schema.outboundTasks).values({
       clinicId, patientId: appt.patientId, appointmentId, purpose: "NO_SHOW_REBOOK", channel: "CALL", nextAttemptAt: at.toJSDate(),
@@ -268,7 +323,7 @@ export async function setAppointmentStatus(
   }
   if (status === "SHOWED") {
     await db.update(schema.patients).set({ isNew: false }).where(eq(schema.patients.id, appt.patientId));
-    if (clinic.feedbackEnabled) {
+    if (clinic.feedbackEnabled && f.feedback) {
       const at = nextCallingTime(now.plus({ minutes: clinic.feedbackDelayMinutes }), clinic.callingHoursStart, clinic.callingHoursEnd);
       await db.insert(schema.outboundTasks).values({
         clinicId, patientId: appt.patientId, appointmentId, purpose: "FEEDBACK", channel: clinic.feedbackChannel, nextAttemptAt: at.toJSDate(),

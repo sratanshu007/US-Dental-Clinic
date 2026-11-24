@@ -12,12 +12,14 @@ const icon = (name: IconName, active: IconName) => ({ color, focused }: { color:
 export default function TabsLayout() {
   const { user, ready } = useAuth();
   const [badges, setBadges] = useState({ crm: 0, alerts: 0 });
+  // The CRM tab only shows on plans that include it (Growth, Pro)
+  const [crmOn, setCrmOn] = useState(true);
 
   const load = useCallback(() => {
     if (!user) return;
-    Promise.all([api("/api/crm/summary"), api<any[]>("/api/notifications?unread=1")])
-      .then(([s, n]) => setBadges({ crm: s.stages.NEW.count + s.tasks.overdue, alerts: n.length }))
-      .catch(() => {});
+    api<any>("/api/dashboard").then((d) => setCrmOn(d.plan?.features?.crm !== false)).catch(() => {});
+    api<any[]>("/api/notifications?unread=1").then((n) => setBadges((b) => ({ ...b, alerts: n.length }))).catch(() => {});
+    api<any>("/api/crm/summary").then((s) => setBadges((b) => ({ ...b, crm: s.stages.NEW.count + s.tasks.overdue }))).catch(() => {});
   }, [user]);
   useFocusEffect(load);
 
@@ -38,7 +40,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: "Today", tabBarIcon: icon("calendar-outline", "calendar") }} />
       <Tabs.Screen name="report" options={{ title: "Report", tabBarIcon: icon("bar-chart-outline", "bar-chart") }} />
-      <Tabs.Screen name="crm" options={{ title: "CRM", tabBarIcon: icon("people-outline", "people"), tabBarBadge: badges.crm || undefined }} />
+      <Tabs.Screen name="crm" options={{ title: "CRM", href: crmOn ? undefined : null, tabBarIcon: icon("people-outline", "people"), tabBarBadge: badges.crm || undefined }} />
       <Tabs.Screen name="alerts" options={{ title: "Alerts", tabBarIcon: icon("notifications-outline", "notifications"), tabBarBadge: badges.alerts || undefined }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("ellipsis-horizontal-circle-outline", "ellipsis-horizontal-circle") }} />
     </Tabs>

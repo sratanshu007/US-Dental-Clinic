@@ -1,20 +1,22 @@
-// Endpoints used only by the Python voice agent (authenticated with X-Internal-Key).
+// Endpoints used only by the voice agent (authenticated with X-Internal-Key).
 // Every tool call is tied to a call record, and the AI can only touch appointments that
 // belong to the patient on that call (matched by phone number) — never anyone else's.
 import { Router } from "express";
-import { and, asc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { db, schema } from "../db";
 import type { Patient } from "../db/schema";
 import { audit } from "../lib/audit";
 import { encrypt } from "../lib/crypto";
+import { dobHash, MAX_VERIFY_ATTEMPTS, normalizeDob, sameName } from "../lib/identity";
 import { ah, badRequest, HttpError, notFound } from "../lib/http";
 import { normalizeUsPhone } from "../lib/phone";
 import { speakable } from "../lib/time";
 import { requireInternalKey } from "../middleware/auth";
 import { addTask, createLead, logActivity, openLeadForPhone, setStage } from "../services/crm";
 import { notifyClinic } from "../services/notify";
+import { billingAllowsService, features } from "../services/plans";
 import {
   bookAppointment, findNextSlots, getAvailability, getClinic, setAppointmentStatus, upsertPatient,
 } from "../services/scheduling";
@@ -60,8 +62,13 @@ internalRouter.post("/calls/start", ah(async (req, res) => {
 
   if (b.direction === "INBOUND") {
     const to = normalizeUsPhone(b.to);
-    const clinic = to ? await db.query.clinics.findFirst({ where: eq(schema.clinics.aiPhoneNumber, to) }) : null;
-    if (!clinic || !clinic.active || !clinic.aiEnabled) throw notFound("No active clinic for this number");
+    let clinic = to ? await db.query.clinics.findFirst({ where: eq(schema.clinics.aiPhoneNumber, to) }) : null;
+    if (!clinic && to) {
+      // Extra numbers (Pro plan)
+      const extra = await db.query.clinicNumbers.findFirst({ where: eq(schema.clinicNumbers.number, to) });
+      if (extra) clinic = await db.query.clinics.findFirst({ where: eq(schema.clinics.id, extra.clinicId) });
+    }
+    if (!clinic || !clinic.active || !clinic.aiEnabled || !billingAllowsService(clinic)) throw notFound("No active clinic for this number");
     clinicId = clinic.id;
     const from = normalizeUsPhone(b.from);
     if (from) {
@@ -89,6 +96,7 @@ internalRouter.post("/calls/start", ah(async (req, res) => {
     clinicId, patientId: patient?.id, appointmentId, taskId: b.taskId ?? null, plivoCallUuid: b.plivoCallUuid ?? null,
     direction: b.direction, purpose, fromNumber: b.from, toNumber: b.to,
   }).returning();
+  const f = features(clinic);
 
   const services = await db.query.services.findMany({
     where: and(eq(schema.services.clinicId, clinicId), eq(schema.services.active, true)),
@@ -107,6 +115,8 @@ internalRouter.post("/calls/start", ah(async (req, res) => {
       name: clinic.name, timezone: clinic.timezone, address: clinic.address, website: clinic.website,
       businessHours: clinic.businessHours, greeting: clinic.aiGreeting, extraInstructions: clinic.aiExtraInstructions,
       transferNumber: clinic.transferNumber, smsEnabled: clinic.smsEnabled,
+      // Phone line rules the agent must follow (AI + transcription disclosure, automated-call consent)
+      collectInsurance: true,
       nowLocal: now.toFormat("cccc, LLLL d, yyyy h:mm a"), todayISO: now.toISODate(),
     },
     services: services.map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin, description: s.description })),
@@ -116,10 +126,11 @@ internalRouter.post("/calls/start", ah(async (req, res) => {
     // Outbound: we dialed a number on file; the agent confirms it is talking to this person first.
     patient: patient
       ? b.direction === "INBOUND"
-        ? { known: true, isNew: patient.isNew, smsConsent: patient.smsConsent }
-        : { known: true, isNew: patient.isNew, smsConsent: patient.smsConsent, firstName: patient.firstName }
+        ? { known: true, isNew: patient.isNew, smsConsent: patient.smsConsent, hasDob: !!patient.dobHash }
+        : { known: true, isNew: patient.isNew, smsConsent: patient.smsConsent, firstName: patient.firstName, hasDob: !!patient.dobHash }
       : null,
     missedAppointment,
+    features: f,
   });
 }));
 
@@ -137,13 +148,18 @@ async function setOutcome(callId: string, outcome: string, appointmentId?: strin
   await db.update(schema.calls).set({ outcome, ...(appointmentId ? { appointmentId } : {}) }).where(eq(schema.calls.id, callId));
 }
 
-async function ownedAppointment(clinicId: string, phone: string | null, appointmentId: string) {
+async function ownedAppointment(
+  call: { verifiedPatientId: string | null }, clinicId: string, phone: string | null, appointmentId: string,
+) {
   if (!phone) throw new HttpError(403, "Caller ID unavailable — cannot change appointments");
+  if (!call.verifiedPatientId) throw new HttpError(403, "Verify the caller with verify_caller first");
   const a = await db.query.appointments.findFirst({
     where: and(eq(schema.appointments.id, appointmentId), eq(schema.appointments.clinicId, clinicId)),
     with: { patient: true },
   });
-  if (!a || a.patient.phone !== phone) throw new HttpError(403, "That appointment is not on file for this phone number");
+  if (!a || a.patient.phone !== phone || a.patientId !== call.verifiedPatientId) {
+    throw new HttpError(403, "That appointment is not on file for this caller");
+  }
   return a;
 }
 
@@ -187,16 +203,32 @@ internalRouter.post("/tools/:name", ah(async (req, res) => {
         providerId: z.string().optional(),
         reason: z.string().max(200).optional(),
         smsConsent: z.boolean().optional(),
+        callConsent: z.boolean().optional(),
+        dateOfBirth: z.string().max(40).optional(),
+        insurance: z.string().max(200).optional(),
         callbackPhone: z.string().optional(),
       }).parse(args);
       const bookPhone = phone ?? normalizeUsPhone(a.callbackPhone);
+      // An unverified caller may book, but may not rename an existing patient record on this number.
+      const onFile = bookPhone
+        ? await db.query.patients.findFirst({ where: and(eq(schema.patients.clinicId, clinic.id), eq(schema.patients.phone, bookPhone)) })
+        : null;
+      const mayEdit = !onFile || call.verifiedPatientId === onFile.id;
+      if (a.dateOfBirth && !normalizeDob(a.dateOfBirth)) {
+        return res.json({ ok: false, error: "That date of birth didn't sound right. Ask again for month, day and year." });
+      }
       if (!bookPhone) return res.json({ ok: false, error: "Need a phone number for the appointment. Ask the caller for their 10 digit number." });
       try {
         const appt = await bookAppointment({
-          clinicId: clinic.id, patientPhone: bookPhone, firstName: a.firstName, lastName: a.lastName, startAt: a.startAt,
-          serviceId: a.serviceId, providerId: a.providerId, reason: a.reason, smsConsent: a.smsConsent,
-          // Patient called/answered the clinic's AI line and booked: consent to calls about this appointment
-          callConsent: true,
+          clinicId: clinic.id, patientPhone: bookPhone,
+          firstName: mayEdit || !onFile?.firstName ? a.firstName : undefined,
+          lastName: mayEdit || !onFile?.lastName ? a.lastName : undefined,
+          startAt: a.startAt, serviceId: a.serviceId, providerId: a.providerId, reason: a.reason,
+          smsConsent: mayEdit || !onFile ? a.smsConsent : undefined,
+          // Only when the caller said yes to calls about their visit, including automated calls (TCPA)
+          callConsent: a.callConsent === true && mayEdit ? true : undefined,
+          dateOfBirth: a.dateOfBirth,
+          insurance: mayEdit ? a.insurance : undefined,
           source: call.direction === "INBOUND" ? "AI_CALL" : "AI_OUTBOUND",
         });
         await db.update(schema.calls).set({ patientId: appt.patientId }).where(eq(schema.calls.id, call.id));
@@ -225,22 +257,88 @@ internalRouter.post("/tools/:name", ah(async (req, res) => {
       }
     }
 
-    case "find_my_appointments": {
-      // Light identity check against caller-ID spoofing: caller must give the first name on file.
-      const a = z.object({ firstName: z.string().min(1) }).parse(args);
-      if (!phone) return res.json({ appointments: [], message: "Caller ID unavailable. Offer to have the front desk call back." });
-      const p = await db.query.patients.findFirst({ where: and(eq(schema.patients.clinicId, clinic.id), eq(schema.patients.phone, phone)) });
-      if (!p) return res.json({ appointments: [], message: "No appointments on file for this phone number." });
-      if (p.firstName && p.firstName.trim().toLowerCase() !== a.firstName.trim().toLowerCase()) {
-        await log("IDENTITY_MISMATCH");
-        return res.json({ appointments: [], message: "Name does not match our records for this number. Do not share any appointment details. Offer to have the front desk call back." });
+    case "verify_caller": {
+      // Caller ID can be spoofed: before reading out or changing an existing appointment, the caller must
+      // give the first name AND date of birth on file (or last name, for patients with no DOB on file yet).
+      const a = z.object({
+        firstName: z.string().min(1).max(60),
+        lastName: z.string().max(60).optional(),
+        dateOfBirth: z.string().max(40).optional(),
+      }).parse(args);
+      if (!phone) return res.json({ verified: false, message: "Caller ID unavailable. Offer to have the front desk call back." });
+      if (call.verifiedPatientId) return res.json({ verified: true });
+      if (call.verifyAttempts >= MAX_VERIFY_ATTEMPTS) {
+        return res.json({ verified: false, locked: true, message: "Too many attempts. Do not share any details. Offer a callback from the front desk with save_inquiry." });
       }
-      return res.json({ appointments: await upcomingFor(clinic.id, p.id, tz) });
+      const p = await db.query.patients.findFirst({ where: and(eq(schema.patients.clinicId, clinic.id), eq(schema.patients.phone, phone)) });
+      const [{ verifyAttempts }] = await db.update(schema.calls)
+        .set({ verifyAttempts: sql`${schema.calls.verifyAttempts} + 1` })
+        .where(eq(schema.calls.id, call.id)).returning({ verifyAttempts: schema.calls.verifyAttempts });
+      const left = MAX_VERIFY_ATTEMPTS - verifyAttempts;
+      const fail = async (needs?: string) => {
+        await log("IDENTITY_MISMATCH");
+        if (left <= 0) {
+          await notifyClinic(clinic.id, "SECURITY", "Caller failed identity check", "A caller could not verify their identity 3 times. Review the call in the dashboard.", `/calls/${call.id}`);
+          return res.json({ verified: false, locked: true, message: "Could not verify. Do not share any details. Offer a callback from the front desk." });
+        }
+        return res.json({ verified: false, attemptsLeft: left, message: needs ?? "Details don't match our records. Do not share any appointment details. You may ask them to repeat once." });
+      };
+      if (!p || !sameName(p.firstName, a.firstName)) return fail();
+      if (p.dobHash) {
+        const dob = normalizeDob(a.dateOfBirth);
+        if (!dob) { // Not counted as a miss: they just haven't said it yet
+          await db.update(schema.calls).set({ verifyAttempts: sql`${schema.calls.verifyAttempts} - 1` }).where(eq(schema.calls.id, call.id));
+          return res.json({ verified: false, needs: "dateOfBirth", message: "Ask for their date of birth (month, day and year), then call verify_caller again." });
+        }
+        if (dobHash(dob) !== p.dobHash) return fail();
+      } else {
+        if (!p.lastName) {
+          // Only a first name on file: weakest case. Allow, but staff can add a DOB in the dashboard.
+        } else if (!a.lastName) {
+          await db.update(schema.calls).set({ verifyAttempts: sql`${schema.calls.verifyAttempts} - 1` }).where(eq(schema.calls.id, call.id));
+          return res.json({ verified: false, needs: "lastName", message: "Ask for their last name, then call verify_caller again." });
+        } else if (!sameName(p.lastName, a.lastName)) return fail();
+      }
+      await db.update(schema.calls).set({ verifiedPatientId: p.id, verifiedAt: new Date(), patientId: p.id }).where(eq(schema.calls.id, call.id));
+      await log("IDENTITY_VERIFIED");
+      // Ask for a DOB next time if we don't have one yet
+      return res.json({ verified: true, askDobForRecords: !p.dobHash });
+    }
+
+    case "find_my_appointments": {
+      if (!phone) return res.json({ appointments: [], message: "Caller ID unavailable. Offer to have the front desk call back." });
+      if (!call.verifiedPatientId) return res.json({ appointments: [], message: "Verify the caller first with verify_caller. Do not share any details yet." });
+      return res.json({ appointments: await upcomingFor(clinic.id, call.verifiedPatientId, tz) });
+    }
+
+    case "save_date_of_birth": {
+      // After a weak (name-only) verification, store a DOB so future calls use the stronger check.
+      const a = z.object({ dateOfBirth: z.string().max(40) }).parse(args);
+      if (!call.verifiedPatientId) return res.json({ ok: false, error: "Caller not verified." });
+      const dob = normalizeDob(a.dateOfBirth);
+      if (!dob) return res.json({ ok: false, error: "Ask again for month, day and year." });
+      const p = await db.query.patients.findFirst({ where: eq(schema.patients.id, call.verifiedPatientId) });
+      if (p && !p.dobHash) await db.update(schema.patients).set({ dobHash: dobHash(dob), dobEnc: encrypt(dob) }).where(eq(schema.patients.id, p.id));
+      return res.json({ ok: true });
+    }
+
+    case "opt_out_calls": {
+      // "Stop calling me" / "take me off your list" — honored immediately for automated calls (TCPA).
+      const target = call.patientId ?? (phone
+        ? (await db.query.patients.findFirst({ where: and(eq(schema.patients.clinicId, clinic.id), eq(schema.patients.phone, phone)) }))?.id
+        : undefined);
+      if (target) {
+        await db.update(schema.patients).set({ callOptOut: true, callConsent: false }).where(eq(schema.patients.id, target));
+        await db.update(schema.outboundTasks).set({ status: "CANCELLED", lastError: "patient opted out of calls" })
+          .where(and(eq(schema.outboundTasks.patientId, target), eq(schema.outboundTasks.status, "PENDING"), eq(schema.outboundTasks.channel, "CALL")));
+      }
+      await log("CALL_OPT_OUT");
+      return res.json({ ok: true });
     }
 
     case "reschedule_appointment": {
       const a = z.object({ appointmentId: z.string(), newStartAt: z.string() }).parse(args);
-      const old = await ownedAppointment(clinic.id, phone, a.appointmentId);
+      const old = await ownedAppointment(call, clinic.id, phone, a.appointmentId);
       try {
         const appt = await bookAppointment({
           clinicId: clinic.id, patientPhone: old.patient.phone, startAt: a.newStartAt, serviceId: old.serviceId,
@@ -258,7 +356,7 @@ internalRouter.post("/tools/:name", ah(async (req, res) => {
 
     case "cancel_appointment": {
       const a = z.object({ appointmentId: z.string() }).parse(args);
-      await ownedAppointment(clinic.id, phone, a.appointmentId);
+      await ownedAppointment(call, clinic.id, phone, a.appointmentId);
       await setAppointmentStatus(clinic.id, a.appointmentId, "CANCELLED");
       await setOutcome(call.id, "CANCELLED", a.appointmentId);
       await notifyClinic(clinic.id, "CANCELLED", "Appointment cancelled", "A patient cancelled by phone. Open the app for details.", `/appointments/${a.appointmentId}`);
@@ -268,7 +366,7 @@ internalRouter.post("/tools/:name", ah(async (req, res) => {
 
     case "confirm_appointment": {
       const a = z.object({ appointmentId: z.string() }).parse(args);
-      await ownedAppointment(clinic.id, phone, a.appointmentId);
+      await ownedAppointment(call, clinic.id, phone, a.appointmentId);
       await setAppointmentStatus(clinic.id, a.appointmentId, "CONFIRMED");
       await log("CONFIRMED", a.appointmentId);
       return res.json({ ok: true });

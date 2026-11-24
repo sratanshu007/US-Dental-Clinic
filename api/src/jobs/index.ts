@@ -11,6 +11,10 @@ import { notifyClinic } from "../services/notify";
 import { dailySummary } from "../services/reports";
 import { setAppointmentStatus } from "../services/scheduling";
 import { sendSms } from "../services/sms";
+import { billingAllowsService } from "../services/plans";
+import { alert, scrub } from "../lib/alerts";
+import { billingJob } from "../services/billing";
+import { syncAllPms } from "../services/pms";
 import { reminderText } from "../services/smsText";
 
 const running = new Set<string>();
@@ -21,6 +25,7 @@ async function once(name: string, fn: () => Promise<void>) {
     await fn();
   } catch (e) {
     console.error(`[job:${name}]`, (e as Error).message);
+    await alert(`job:${name}`, `Background job "${name}" failed: ${scrub((e as Error).message)}`);
   } finally {
     running.delete(name);
   }
@@ -116,6 +121,11 @@ export async function dispatchOutbound() {
       .returning();
     if (!claimed) continue;
 
+    if (task.channel === "SMS" && clinic.smsOnlyBooked) {
+      // Clinic setting: patients get texts only once an appointment is booked
+      await db.update(schema.outboundTasks).set({ status: "CANCELLED", lastError: "texts only for booked appointments" }).where(eq(schema.outboundTasks.id, task.id));
+      continue;
+    }
     if (task.channel === "SMS") {
       const text = task.purpose === "FEEDBACK"
         ? `Thanks for visiting ${clinic.name}! How was your visit? Reply with a number 1-5 (5 = great) and any comments.`
@@ -126,7 +136,8 @@ export async function dispatchOutbound() {
     }
 
     // CALL channel
-    if (!clinic.aiEnabled || !patient.callConsent) {
+    // Automated (AI voice) calls need prior express consent under the TCPA and must honor opt-outs.
+    if (!clinic.aiEnabled || !patient.callConsent || patient.callOptOut || !billingAllowsService(clinic)) {
       // No consent to call: fall back to SMS if allowed, else give up
       if (patient.smsConsent && !patient.smsOptOut) {
         await db.update(schema.outboundTasks).set({ status: "PENDING", channel: "SMS", attempts: 0 }).where(eq(schema.outboundTasks.id, task.id));
@@ -219,5 +230,7 @@ export function startJobs() {
   });
   cron.schedule("*/5 * * * *", () => void once("autoNoShow", autoNoShow));
   cron.schedule("17 3 * * *", () => void once("purge", purgeOldData));
+  cron.schedule("*/5 * * * *", () => void once("pmsSync", syncAllPms));
+  cron.schedule("7 * * * *", () => void once("billing", billingJob));
   console.log("[jobs] scheduled");
 }

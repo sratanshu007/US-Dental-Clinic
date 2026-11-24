@@ -1,4 +1,4 @@
-# Dental AI Receptionist (Plivo + Pipecat)
+# Dental AI Receptionist (Plivo + Node.js + React)
 
 A 24/7 AI receptionist for US dental clinics. It answers calls, books, reschedules and cancels
 appointments, captures sales inquiries, texts reminders, calls no-show patients to rebook, calls
@@ -6,9 +6,56 @@ patients after their visit for feedback, and sends the clinic a daily report on 
 
 Built by Deific Digital. Multi-clinic: one deployment serves many clinics, each with its own Plivo number.
 
+## Making calls fast and natural (v4.1)
+
+What the voice agent does: greeting plays instantly from cached audio (session fetched while the phone rings) ·
+turn ends ~300 ms after the caller stops, but waits if they sound mid-sentence · reply starts speaking at the first
+sentence/clause over a streaming TTS socket · "Let me check what's open." while it looks things up · "Mm-hmm." if
+the LLM is slow · "okay / uh-huh" while the AI talks is treated as listening · real interruptions stop the AI at once ·
+human conversation style in the prompt · prompt ordered so the LLM can cache it. Every turn logs `reply latency` in ms.
+
+Measured in the end-to-end test: greeting 20 ms after the audio connects; reply 609 ms after the caller stops with a
+600 ms LLM (agent overhead ≈ 10 ms); "Mm-hmm" at 0.9 s when the LLM takes 1.6 s.
+
+**What decides the real delay on a live call (in order):**
+1. **Server location.** Run the voice agent in a US region (AWS us-east-1/us-east-2), close to Plivo and the AI
+   vendors. A server in India adds roughly 250–300 ms *each way* on every audio packet and every API call.
+2. **LLM model.** Use a fast, non-reasoning model (e.g. gpt-4o-mini, or a "fast/non-reasoning" Grok model).
+   Reasoning models think before answering and can add several seconds.
+3. **Voice.** Deepgram Aura streams audio as it's generated. Edge TTS waits for the whole sentence, adds delay,
+   and has no BAA — don't use it for real calls.
+4. Keep the clinic's "extra instructions" short; a huge prompt slows every reply.
+
+## New in v4 (all Node.js + React, hardened)
+
+| Area | What changed |
+| --- | --- |
+| Voice agent | Rewritten in **Node.js/TypeScript** (was Python): Plivo media stream → Deepgram STT → LLM tool calling → Deepgram TTS, streamed sentence by sentence, barge-in, live transfer, hang-up after the goodbye is heard |
+| Whole stack | API (Node/Express), voice (Node), dashboard (React/Next.js), app (React Native/Expo) — one language |
+| Security | Account lockout, no email enumeration, instant token revocation, refresh-token theft detection, 2FA re-auth, admin 2FA required, strong password policy, JWT alg/issuer/audience pinned, roles re-read from DB, production config guard, CSP + HSTS on the dashboard, internal routes blocked at the proxy, non-root read-only containers. See [SECURITY.md](SECURITY.md) |
+| Dependencies | Plivo SDK removed (critical advisories in its dependencies); `npm audit` = 0 known vulnerabilities in API, voice and dashboard |
+| Plans | Plan badge, CRM locked with upgrade card on Starter (web + app), billing banners (payment failed / canceled), plan + billing chosen when creating a clinic |
+| Tests | 45 API tests (incl. 12 security tests) + voice end-to-end test (fake Plivo call → real API) + unit tests |
+
+## New in v3 (production readiness)
+
+| Area | What changed |
+| --- | --- |
+| Caller identity | `verify_caller`: name + date of birth before any existing appointment is shared or changed; locks after 3 tries; unverified callers can't rename records |
+| Consent (TCPA) | AI asks for text **and** automated-call consent, records when/how; "stop calling me" opt-out; outbound calls say they're automated |
+| Disclosure | Every greeting says it's an AI assistant and the call may be transcribed |
+| Insurance | Carrier + member name captured for new patients (encrypted) |
+| Open Dental | Two-way sync: busy times pulled every 5 min, AI bookings/reschedules/cancels written back |
+| Plans & billing | Starter/Growth/Pro limits and features, monthly minutes + overage, 80% alert, Stripe checkout/portal/webhooks or manual invoicing |
+| Pro numbers | Extra phone numbers per clinic |
+| Ops | `/ready` health checks, Slack/Discord alerts (no PHI), crash alerts, nightly encrypted S3 backups + restore script, load test |
+| Hosting | `deploy/aws/` — EC2 + encrypted RDS + Caddy + CloudWatch, step-by-step `AWS-SETUP.md` |
+| LLM | `LLM_PROVIDER=xai` for Grok (needs xAI BAA + zero data retention) |
+| Fix | Booking under heavy load no longer deadlocks the database pool |
+
 ```
- Patient phone ──► Plivo number ──► voice/  (Python, Pipecat)
-                                     Deepgram STT → OpenAI LLM (+tools) → Deepgram TTS
+ Patient phone ──► Plivo number ──► voice/  (Node.js, TypeScript)
+                                     Deepgram STT → LLM: OpenAI / Grok (+tools) → Deepgram TTS
                                           │  tool calls (X-Internal-Key)
                                           ▼
  Clinic web admin (web/, Next.js) ──► api/  (Node.js, Express, PostgreSQL) ◄── mobile/ (Expo React Native)
@@ -23,7 +70,7 @@ Built by Deific Digital. Multi-clinic: one deployment serves many clinics, each 
 | Folder | What it is |
 |---|---|
 | `api/` | Node.js + TypeScript API, PostgreSQL (Drizzle ORM), background jobs, Plivo SMS, audit log, 2FA |
-| `voice/` | Python voice agent: Plivo audio stream → Pipecat pipeline, inbound reception + outbound no-show / feedback calls, live transfer |
+| `voice/` | Node.js voice agent: Plivo audio stream → Deepgram → LLM tools → Deepgram, inbound reception + outbound no-show / feedback calls, live transfer |
 | `web/` | Next.js web admin: clinic dashboard + Deific super admin (all clinics) |
 | `mobile/` | Expo React Native clinic app: today's appointments (Came / No-show), daily report, CRM follow-ups, push alerts |
 | `extras/` | Clickable HTML sales demo + 3.5-minute walkthrough video to show clinics |
@@ -35,7 +82,7 @@ Built by Deific Digital. Multi-clinic: one deployment serves many clinics, each 
 **AI receptionist (calls)**
 - Answers every call 24/7 with the clinic's greeting, hours, services, insurance and pricing info
 - Books into the built-in calendar (per-dentist availability, no double booking)
-- Existing patients: find, reschedule, cancel, confirm (after a first-name identity check)
+- Existing patients: find, reschedule, cancel, confirm (after a name + date-of-birth identity check)
 - Captures sales inquiries (prices, Invisalign, insurance…) as leads with an instant alert
 - Live transfer to the front desk; 911 guidance for real emergencies
 - Call summary + encrypted transcript saved for every call
@@ -91,7 +138,7 @@ You must do (see the HIPAA checklist sheet):
 
 ## Run it locally
 
-Requirements: Node 20+, Python 3.11+, PostgreSQL 16 (or Docker).
+Requirements: Node 22+, PostgreSQL 16 (or Docker).
 
 ```bash
 # 1) Database
@@ -112,10 +159,9 @@ npm install && npm run dev  # http://localhost:3000
 
 # 4) Voice agent
 cd ../voice
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # Plivo, Deepgram, OpenAI keys; PUBLIC_URL = your ngrok https URL
-python server.py            # :7860   (ngrok http 7860)
+npm install
+cp .env.example .env        # Plivo, Deepgram, LLM keys; PUBLIC_URL = your ngrok https URL
+npm run dev                 # :7860   (ngrok http 7860)
 
 # 5) Mobile app
 cd ../mobile
@@ -132,8 +178,9 @@ Demo logins after `npm run seed`: `admin@deificdigital.com` / `ChangeMe-Admin-20
 ### Tests
 
 ```bash
-cd api && JOBS_ENABLED=false npm test          # 15 end-to-end API tests against Postgres (incl. CRM + filters)
-cd voice && INTERNAL_API_KEY=... python -m tests.test_contract   # voice agent ↔ API contract (API running)
+cd api && JOBS_ENABLED=false npm test          # 45 API tests against Postgres (flows, plans, billing, Open Dental, security)
+cd voice && INTERNAL_API_KEY=... npm test      # unit tests + end-to-end fake call through the real API (API running, demo seed)
+node voice/test/sig-vectors.cjs               # optional: Plivo signature check vs the official SDK (needs `npm i plivo` temporarily)
 ```
 
 ## Going live with a clinic
@@ -168,15 +215,15 @@ clinic per month for billing.
 
 ## Configuration notes
 
-- **TTS voice**: `DEEPGRAM_VOICE` (default `aura-2-thalia-en`) or `TTS_PROVIDER=cartesia`.
-- **LLM**: `OPENAI_MODEL` (default `gpt-4o-mini`); point `OPENAI_BASE_URL` at Azure OpenAI if you prefer Microsoft's BAA.
-- **Prompts**: `voice/prompts.py` (reception, no-show, feedback).
-- **Tools the AI can use**: `voice/tools.py` → `api/src/routes/internal.ts`.
+- **TTS voice**: `DEEPGRAM_VOICE` (default `aura-2-thalia-en`). Turn-taking: `ENDPOINTING_MS` (default 400).
+- **LLM**: `LLM_PROVIDER=openai|xai|custom`, `OPENAI_MODEL`; point `OPENAI_BASE_URL` at Azure OpenAI if you prefer Microsoft's BAA.
+- **Prompts**: `voice/src/prompts.ts` (reception, no-show, feedback).
+- **Tools the AI can use**: `voice/src/tools.ts` → `api/src/routes/internal.ts`. Call flow: `voice/src/call.ts`.
 - **Jobs**: `api/src/jobs/index.ts` (every minute: reminders, outbound dispatch, daily report; every 5 min: auto no-show; nightly: purge).
 
 ## Not included yet (good next steps)
 
-- Practice-management sync (Open Dental / Dentrix / Eaglesoft)
+- Practice-management sync for Dentrix / Eaglesoft (Open Dental is done)
 - Two-way SMS inbox in the dashboard
 - CRM email sending (activities can be logged, but emails are sent from your own mailbox)
 - Call recording audio storage (only transcripts are stored)

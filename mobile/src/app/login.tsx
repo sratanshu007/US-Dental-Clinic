@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Redirect } from "expo-router";
+import Constants from "expo-constants";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Btn, C, ErrorText, GRADIENT, s } from "../components/ui";
 import { api } from "../lib/api";
@@ -10,10 +11,9 @@ import { useAuth } from "../lib/auth";
 
 export default function Login() {
   const { user, ready, signIn } = useAuth();
-  const envEmail = process.env.EXPO_PUBLIC_LOGIN_EMAIL ?? "";
-  const envPassword = process.env.EXPO_PUBLIC_LOGIN_PASSWORD ?? "";
-  const [email, setEmail] = useState(envEmail);
-  const [password, setPassword] = useState(envPassword);
+  const extra = (Constants.expoConfig?.extra || {}) as Record<string, string>;
+  const [email, setEmail] = useState(extra.adminEmail || "admin@deificdigital.com");
+  const [password, setPassword] = useState(extra.adminPassword || "ChangeMe-Admin-2026");
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
