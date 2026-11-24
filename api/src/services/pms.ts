@@ -201,6 +201,7 @@ export async function pushAppointment(clinicId: string, appointmentId: string, r
 
 /** Job: pull busy times and retry unsynced bookings for every connected clinic. */
 export async function syncAllPms(): Promise<void> {
+  if (!config.openDental.developerKey) return;
   const clinics = await db.query.clinics.findMany({ where: and(eq(schema.clinics.active, true), eq(schema.clinics.pmsType, "OPEN_DENTAL")) });
   for (const clinic of clinics) {
     if (!features(clinic).pmsSync) continue;
