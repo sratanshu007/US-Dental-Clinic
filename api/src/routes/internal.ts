@@ -224,7 +224,7 @@ internalRouter.post("/tools/:name", ah(async (req, res) => {
           firstName: mayEdit || !onFile?.firstName ? a.firstName : undefined,
           lastName: mayEdit || !onFile?.lastName ? a.lastName : undefined,
           startAt: a.startAt, serviceId: a.serviceId, providerId: a.providerId, reason: a.reason,
-          smsConsent: mayEdit || !onFile ? a.smsConsent : undefined,
+          smsConsent: mayEdit || !onFile ? (a.smsConsent ?? true) : (onFile?.smsConsent || a.smsConsent === true),
           // Only when the caller said yes to calls about their visit, including automated calls (TCPA)
           callConsent: a.callConsent === true && mayEdit ? true : undefined,
           dateOfBirth: a.dateOfBirth,

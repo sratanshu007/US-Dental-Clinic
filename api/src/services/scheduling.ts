@@ -280,7 +280,7 @@ export async function bookAppointment(input: BookInput): Promise<Appointment> {
       `/appointments/${appt.created.id}`,
     );
   }
-  await sendSms(clinic, appt.patient, await bookedText(clinic, appt.patient, appt.created), "BOOKED");
+  await sendSms(clinic, appt.patient, await bookedText(clinic, appt.patient, appt.created), "BOOKED", { skipConsentCheck: true });
   queuePmsPush(clinic, appt.created.id, input.rescheduledFromId);
   return appt.created;
 }
