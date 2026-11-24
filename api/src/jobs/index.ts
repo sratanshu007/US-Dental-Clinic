@@ -14,7 +14,6 @@ import { sendSms } from "../services/sms";
 import { billingAllowsService } from "../services/plans";
 import { alert, scrub } from "../lib/alerts";
 import { billingJob } from "../services/billing";
-import { syncAllPms } from "../services/pms";
 import { reminderText } from "../services/smsText";
 
 const running = new Set<string>();
@@ -230,7 +229,6 @@ export function startJobs() {
   });
   cron.schedule("*/5 * * * *", () => void once("autoNoShow", autoNoShow));
   cron.schedule("17 3 * * *", () => void once("purge", purgeOldData));
-  cron.schedule("*/5 * * * *", () => void once("pmsSync", syncAllPms));
   cron.schedule("7 * * * *", () => void once("billing", billingJob));
   console.log("[jobs] scheduled");
 }

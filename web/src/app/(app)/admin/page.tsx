@@ -54,7 +54,6 @@ export default function Admin() {
                     <select value={c.billingStatus} onChange={(e) => api(`/admin/clinics/${c.id}`, { method: "PATCH", body: { billingStatus: e.target.value } }).then(reload)}>
                       {["TRIAL", "MANUAL", "ACTIVE", "PAST_DUE", "CANCELED"].map((b) => <option key={b} value={b}>{b.replace("_", " ").toLowerCase()}</option>)}
                     </select>
-                    {c.pmsSyncError && <div className="small" style={{ color: "#b91c1c" }} title={c.pmsSyncError}>Open Dental sync error</div>}
                   </td>
                   <td>{c.thisMonth.calls}</td>
                   <td>{c.thisMonth.minutes}</td>

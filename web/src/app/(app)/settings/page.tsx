@@ -6,7 +6,7 @@ import FilterBar, { useFilters } from "@/components/FilterBar";
 import { ErrorBox, Loading, useApi } from "@/components/ui";
 
 const DAYS: [string, string][] = [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]];
-const TABS = ["Clinic & AI", "Hours", "Services & dentists", "Follow-ups & texts", "Plan & billing", "Practice software", "Team", "Security", "Audit log"] as const;
+const TABS = ["Clinic & AI", "Hours", "Services & dentists", "Follow-ups & texts", "Plan & billing", "Team", "Security", "Audit log"] as const;
 
 export default function Settings() {
   const { data, error, reload } = useApi<any>("/api/settings");
@@ -107,7 +107,6 @@ export default function Settings() {
 
       {tab === "Services & dentists" && isOwner && <ServicesAndProviders data={data} reload={reload} />}
       {tab === "Plan & billing" && isOwner && <Billing />}
-      {tab === "Practice software" && isOwner && <PracticeSoftware providers={data.providers} />}
 
       {tab === "Follow-ups & texts" && isOwner && (
         <div className="card">
