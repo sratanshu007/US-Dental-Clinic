@@ -18,7 +18,7 @@ export const config = {
   internalApiKey: required("INTERNAL_API_KEY"),
   // Optional: only accept /internal calls from these IPs (comma-separated), e.g. the voice container
   internalAllowedIps: (process.env.INTERNAL_ALLOWED_IPS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
-  requireAdminMfa: (process.env.REQUIRE_ADMIN_MFA ?? (process.env.NODE_ENV === "production" ? "true" : "false")) === "true",
+  requireAdminMfa: process.env.REQUIRE_ADMIN_MFA === "true",
   // Account lockout after repeated wrong passwords
   maxFailedLogins: Number(process.env.MAX_FAILED_LOGINS ?? 5),
   lockoutMinutes: Number(process.env.LOCKOUT_MINUTES ?? 15),
