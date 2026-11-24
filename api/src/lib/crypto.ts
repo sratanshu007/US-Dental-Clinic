@@ -1,8 +1,19 @@
 import crypto from "node:crypto";
 import { config } from "../config";
 
-const KEY = Buffer.from(config.encryptionKey, "hex");
-if (KEY.length !== 32) throw new Error("ENCRYPTION_KEY must be 64 hex characters (32 bytes)");
+function getEncryptionKey(raw: string): Buffer {
+  const trimmed = (raw || "").trim();
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return Buffer.from(trimmed, "hex");
+  }
+  if (Buffer.byteLength(trimmed, "utf8") === 32) {
+    return Buffer.from(trimmed, "utf8");
+  }
+  // Fallback for auto-generated keys (e.g. Render generateValue): derive deterministic 32-byte key via SHA-256
+  return crypto.createHash("sha256").update(trimmed).digest();
+}
+
+const KEY = getEncryptionKey(config.encryptionKey);
 
 /** AES-256-GCM. Output: "v1:<iv b64>:<tag b64>:<ciphertext b64>" */
 export function encrypt(plain: string | null | undefined): string | null {
