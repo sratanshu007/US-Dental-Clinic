@@ -1,7 +1,7 @@
 // Routes used by the clinic web dashboard and the mobile app.
 import bcrypt from "bcryptjs";
 import { Router } from "express";
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { db, schema } from "../db";
@@ -452,6 +452,7 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
   const clinicId = clinicScope(req);
   const b = z.object({
     name: z.string().min(2).optional(),
+    aiPhoneNumber: z.string().optional(),
     transferNumber: z.string().nullable().optional(),
     timezone: z.string().optional(),
     address: z.string().nullable().optional(),
@@ -477,6 +478,15 @@ clinicRouter.patch("/settings", ownerOnly, ah(async (req, res) => {
     taskDigestTime: hhmm.optional(),
     retentionDays: z.number().int().min(7).max(3650).optional(),
   }).parse(req.body);
+  if (b.aiPhoneNumber) {
+    const p = normalizeUsPhone(b.aiPhoneNumber);
+    if (!p) throw badRequest("Invalid AI phone number");
+    const taken = await db.query.clinics.findFirst({
+      where: and(eq(schema.clinics.aiPhoneNumber, p), ne(schema.clinics.id, clinicId)),
+    });
+    if (taken) throw badRequest("That phone number is already assigned to another clinic");
+    b.aiPhoneNumber = p;
+  }
   if (b.transferNumber) {
     const t = normalizeUsPhone(b.transferNumber);
     if (!t) throw badRequest("Invalid transfer number");

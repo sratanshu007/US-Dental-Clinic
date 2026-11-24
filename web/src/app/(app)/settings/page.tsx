@@ -63,6 +63,7 @@ export default function Settings() {
             </div>
             <div className="field"><label>Address</label><input value={c.address ?? ""} onChange={set("address")} /></div>
             <div className="field"><label>Website</label><input value={c.website ?? ""} onChange={set("website")} /></div>
+            <div className="field"><label>Plivo AI phone number</label><input value={c.aiPhoneNumber ?? ""} onChange={set("aiPhoneNumber")} placeholder="+1 (210) 555-0100" /></div>
             <div className="field"><label>Staff transfer number (live transfer & emergencies)</label><input value={c.transferNumber ?? ""} onChange={set("transferNumber")} placeholder="(210) 555-0199" /></div>
             <div className="field"><label>Appointment slot length (minutes)</label><input type="number" value={c.slotMinutes} onChange={set("slotMinutes")} /></div>
           </div>
@@ -74,7 +75,7 @@ export default function Settings() {
             <textarea rows={6} value={c.aiExtraInstructions ?? ""} onChange={set("aiExtraInstructions")} placeholder="We accept Delta Dental, Cigna, Aetna. New patient special $99. Free parking behind the building. We do not treat children under 3." />
             <div className="small muted">Don&apos;t put patient information here.</div>
           </div>
-          <button className="primary" onClick={() => saveClinic(["name", "timezone", "address", "website", "transferNumber", "slotMinutes", "aiEnabled", "aiGreeting", "aiExtraInstructions"])}>Save</button>
+          <button className="primary" onClick={() => saveClinic(["name", "aiPhoneNumber", "timezone", "address", "website", "transferNumber", "slotMinutes", "aiEnabled", "aiGreeting", "aiExtraInstructions"])}>Save</button>
         </div>
       )}
 
