@@ -24,7 +24,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     const backend = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL;
     if (!backend) return [];
-    const base = backend.startsWith("http") ? backend : `https://${backend}`;
+    let base = backend.trim().replace(/\/$/, "");
+    if (!base.startsWith("http://") && !base.startsWith("https://")) {
+      base = base.includes(".") ? `https://${base}` : `http://${base}:10000`;
+    }
     return [
       { source: "/api/:path*", destination: `${base}/api/:path*` },
       { source: "/auth/:path*", destination: `${base}/auth/:path*` },

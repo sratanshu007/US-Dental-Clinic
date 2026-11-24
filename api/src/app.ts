@@ -55,15 +55,33 @@ export function createApp() {
   // Public secure-link pages for patients (no login; token + check question)
   app.use("/p", patientRouter);
 
-  const browser = cors({ origin: config.corsOrigins, credentials: false, maxAge: 600 });
+  const allowAnyOrigin = config.corsOrigins.includes("*") || config.corsOrigins.length === 0;
+  const browser = cors({
+    origin: (origin, callback) => {
+      // Allow non-browser requests (mobile, server-to-server, curl)
+      if (!origin || allowAnyOrigin || config.corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      // Allow any onrender.com dashboard or localhost preview
+      if (typeof origin === "string" && (origin.endsWith(".onrender.com") || origin.includes("localhost") || origin.includes("127.0.0.1"))) {
+        return callback(null, true);
+      }
+      callback(null, false);
+    },
+    credentials: false,
+    maxAge: 600,
+  });
+  app.use(browser);
+  app.options("*", browser);
+
   // Broad per-IP limit for the dashboard/app API (login has its own, stricter limit)
   const apiLimiter = rateLimit({ windowMs: 60_000, limit: Number(process.env.API_RATE_LIMIT ?? 600), standardHeaders: true, legacyHeaders: false });
   app.use(["/api", "/admin", "/auth"], apiLimiter);
-  app.use("/auth", browser, authRouter);
-  app.use("/api/crm", browser, crmRouter);
-  app.use("/api/integrations", browser, integrationsRouter);
-  app.use("/api", browser, clinicRouter);
-  app.use("/admin", browser, adminRouter);
+  app.use("/auth", authRouter);
+  app.use("/api/crm", crmRouter);
+  app.use("/api/integrations", integrationsRouter);
+  app.use("/api", clinicRouter);
+  app.use("/admin", adminRouter);
 
   // Liveness: the process is up. Readiness: the database answers too (point uptime monitors here).
   app.get("/health", (_req, res) => res.json({ ok: true }));
