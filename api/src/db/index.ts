@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import bcrypt from "bcryptjs";
 import { config } from "../config";
 import * as schema from "./schema";
 
@@ -128,8 +129,84 @@ async function runAutoMigrations() {
       );
     `);
     console.log("[db:migration:auto] Schema successfully synchronized.");
+    await autoSeedIfEmpty();
   } catch (err: any) {
     console.error("[db:migration:auto] Error synchronizing schema:", err.message);
+  }
+}
+
+async function autoSeedIfEmpty() {
+  try {
+    const existing = await db.query.users.findFirst();
+    if (existing) return;
+
+    console.log("[db:seed] Fresh database detected. Creating initial clinic & accounts...");
+    const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? process.env.ADMIN_EMAIL ?? "admin@example.com").toLowerCase();
+    const adminPass = process.env.SEED_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD ?? "ChangeMe-Admin-2026";
+    const ownerEmail = (process.env.SEED_OWNER_EMAIL ?? process.env.OWNER_EMAIL ?? "owner@demo-dental.com").toLowerCase();
+    const ownerPass = process.env.SEED_OWNER_PASSWORD ?? process.env.OWNER_PASSWORD ?? "ChangeMe-Owner-2026";
+    const demoNumber = process.env.SEED_CLINIC_NUMBER ?? process.env.CLINIC_PHONE_NUMBER ?? "+12105550100";
+
+    const adminHash = await bcrypt.hash(adminPass, 12);
+    const ownerHash = await bcrypt.hash(ownerPass, 12);
+
+    await db.insert(schema.users).values({
+      email: adminEmail,
+      name: "Super Admin",
+      role: "SUPER_ADMIN",
+      passwordHash: adminHash,
+    });
+
+    let clinic = await db.query.clinics.findFirst();
+    if (!clinic) {
+      [clinic] = await db.insert(schema.clinics).values({
+        name: "Demo Family Dental",
+        aiPhoneNumber: demoNumber,
+        transferNumber: "+12105550199",
+        timezone: "America/Chicago",
+        address: "123 Main St, San Antonio, TX",
+        businessHours: {
+          mon: [["08:00", "17:00"]], tue: [["08:00", "17:00"]], wed: [["08:00", "17:00"]],
+          thu: [["08:00", "17:00"]], fri: [["08:00", "14:00"]], sat: [], sun: [],
+        },
+        aiExtraInstructions:
+          "We accept most PPO insurance including Delta Dental, Cigna, Aetna and MetLife. " +
+          "New patient special: exam, X-rays and cleaning for $99. Free parking behind the building.",
+      }).returning();
+
+      await db.insert(schema.providers).values([
+        { clinicId: clinic.id, name: "Dr. Maria Lopez", title: "Dentist" },
+        { clinicId: clinic.id, name: "Dr. James Carter", title: "Dentist" },
+      ]);
+      await db.insert(schema.services).values([
+        { clinicId: clinic.id, name: "New patient exam & cleaning", durationMin: 60 },
+        { clinicId: clinic.id, name: "Cleaning", durationMin: 45 },
+        { clinicId: clinic.id, name: "Emergency / tooth pain", durationMin: 30 },
+        { clinicId: clinic.id, name: "Consultation", durationMin: 30 },
+      ]);
+    }
+
+    await db.insert(schema.users).values({
+      clinicId: clinic.id,
+      email: ownerEmail,
+      name: "Demo Owner",
+      role: "CLINIC_OWNER",
+      passwordHash: ownerHash,
+    });
+
+    if (ownerEmail !== "owner@example.com") {
+      await db.insert(schema.users).values({
+        clinicId: clinic.id,
+        email: "owner@example.com",
+        name: "Clinic Owner",
+        role: "CLINIC_OWNER",
+        passwordHash: ownerHash,
+      });
+    }
+
+    console.log(`[db:seed] Successfully seeded initial admin (${adminEmail}) and owner (${ownerEmail}).`);
+  } catch (e: any) {
+    console.error("[db:seed] Error auto-seeding:", e.message);
   }
 }
 
