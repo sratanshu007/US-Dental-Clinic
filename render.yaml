@@ -1,0 +1,93 @@
+# Render Blueprint for Dental AI Receptionist
+# Deploy via Render Dashboard -> Blueprints
+
+databases:
+  - name: dental-db
+    databaseName: dental
+    user: dental
+    plan: free
+
+services:
+  # ----------------------------------------------------
+  # 1. Backend REST API (Node.js + Express + Drizzle ORM)
+  # ----------------------------------------------------
+  - type: web
+    name: dental-api
+    runtime: node
+    plan: free
+    rootDir: api
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dental-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: INTERNAL_API_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: VOICE_AGENT_URL
+        value: "http://localhost:7860"
+      - key: JOBS_ENABLED
+        value: "true"
+
+  # ----------------------------------------------------
+  # 2. Web Dashboard (Next.js 15)
+  # ----------------------------------------------------
+  - type: web
+    name: dental-web
+    runtime: node
+    plan: free
+    rootDir: web
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: dental-api
+          property: host
+
+  # ----------------------------------------------------
+  # 3. Voice Agent (Node.js + TypeScript + Deepgram)
+  # ----------------------------------------------------
+  - type: web
+    name: dental-voice
+    runtime: node
+    plan: free
+    rootDir: voice
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "7860"
+      - key: API_URL
+        fromService:
+          type: web
+          name: dental-api
+          property: host
+      - key: INTERNAL_API_KEY
+        fromService:
+          type: web
+          name: dental-api
+          envVarKey: INTERNAL_API_KEY
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
