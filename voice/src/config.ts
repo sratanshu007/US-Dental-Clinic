@@ -10,8 +10,8 @@ const env = (name: string, fallback = "") => process.env[name] ?? fallback;
 
 const LLM_BASES: Record<string, string> = { openai: "https://api.openai.com/v1", xai: "https://api.x.ai/v1" };
 const llmProvider = env("LLM_PROVIDER", "openai").toLowerCase();
-const llmModel = env("OPENAI_MODEL", llmProvider === "openai" ? "gpt-4o-mini" : "");
-if (!llmModel) throw new Error("Set OPENAI_MODEL to the model name from your provider's console (e.g. a Grok model for xAI)");
+const llmModel = env("OPENAI_MODEL", env("LLM_MODEL", llmProvider === "openai" ? "gpt-4o-mini" : ""));
+if (!llmModel) throw new Error("Set OPENAI_MODEL or LLM_MODEL in environment variables for your LLM provider");
 
 export const config = {
   env: env("NODE_ENV", "development"),

@@ -12,8 +12,8 @@ import { useAuth } from "../lib/auth";
 export default function Login() {
   const { user, ready, signIn } = useAuth();
   const extra = (Constants.expoConfig?.extra || {}) as Record<string, string>;
-  const [email, setEmail] = useState(extra.adminEmail || "admin@deificdigital.com");
-  const [password, setPassword] = useState(extra.adminPassword || "ChangeMe-Admin-2026");
+  const [email, setEmail] = useState(extra.adminEmail || "");
+  const [password, setPassword] = useState(extra.adminPassword || "");
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);

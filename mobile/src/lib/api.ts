@@ -12,7 +12,7 @@ const SecureStore = Platform.OS === "web"
     }
   : SecureStoreNative;
 
-export const API_URL: string = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ?? "http://localhost:4000";
+export const API_URL: string = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl || process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
 
 export interface User {
   id: string;

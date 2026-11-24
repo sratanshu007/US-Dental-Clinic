@@ -7,13 +7,13 @@ import { api, session } from "@/lib/api";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "admin@deificdigital.com";
-  const adminPass = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "ChangeMe-Admin-2026";
-  const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL || "owner@demo-dental.com";
-  const ownerPass = process.env.NEXT_PUBLIC_OWNER_PASSWORD || "ChangeMe-Owner-2026";
+  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
+  const adminPass = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "";
+  const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL || "";
+  const ownerPass = process.env.NEXT_PUBLIC_OWNER_PASSWORD || "";
 
-  const [email, setEmail] = useState(adminEmail);
-  const [password, setPassword] = useState(adminPass);
+  const [email, setEmail] = useState(adminEmail || ownerEmail || "");
+  const [password, setPassword] = useState(adminPass || ownerPass || "");
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(params.get("expired") ? "Your session ended. Please sign in again." : null);
@@ -59,24 +59,30 @@ function LoginForm() {
               <label>Password</label>
               <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </div>
-            <div style={{ display: "flex", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="secondary small"
-                style={{ fontSize: "12px", padding: "4px 8px" }}
-                onClick={() => { setEmail(adminEmail); setPassword(adminPass); }}
-              >
-                Fill Super Admin
-              </button>
-              <button
-                type="button"
-                className="secondary small"
-                style={{ fontSize: "12px", padding: "4px 8px" }}
-                onClick={() => { setEmail(ownerEmail); setPassword(ownerPass); }}
-              >
-                Fill Clinic Owner
-              </button>
-            </div>
+            {(adminEmail || ownerEmail) && (
+              <div style={{ display: "flex", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
+                {adminEmail && (
+                  <button
+                    type="button"
+                    className="secondary small"
+                    style={{ fontSize: "12px", padding: "4px 8px" }}
+                    onClick={() => { setEmail(adminEmail); setPassword(adminPass); }}
+                  >
+                    Fill Super Admin
+                  </button>
+                )}
+                {ownerEmail && (
+                  <button
+                    type="button"
+                    className="secondary small"
+                    style={{ fontSize: "12px", padding: "4px 8px" }}
+                    onClick={() => { setEmail(ownerEmail); setPassword(ownerPass); }}
+                  >
+                    Fill Clinic Owner
+                  </button>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div className="field">

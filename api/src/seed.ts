@@ -6,10 +6,10 @@ import { DEFAULT_HOURS } from "./routes/admin";
 import { createLead } from "./services/crm";
 
 async function main() {
-  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? "admin@deificdigital.com").toLowerCase();
-  const adminPass = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe-Admin-2026";
-  const ownerEmail = "owner@demo-dental.com";
-  const ownerPass = process.env.SEED_OWNER_PASSWORD ?? "ChangeMe-Owner-2026";
+  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? process.env.ADMIN_EMAIL ?? "admin@example.com").toLowerCase();
+  const adminPass = process.env.SEED_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD ?? "ChangeMe-Admin-2026";
+  const ownerEmail = (process.env.SEED_OWNER_EMAIL ?? process.env.OWNER_EMAIL ?? "owner@example.com").toLowerCase();
+  const ownerPass = process.env.SEED_OWNER_PASSWORD ?? process.env.OWNER_PASSWORD ?? "ChangeMe-Owner-2026";
 
   if (!(await db.query.users.findFirst({ where: eq(schema.users.email, adminEmail) }))) {
     await db.insert(schema.users).values({

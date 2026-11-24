@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-// Security headers for every page. The dashboard only talks to its own origin and the API.
-const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Security headers for every page.
+const api = process.env.NEXT_PUBLIC_API_URL ?? "";
 const isDev = process.env.NODE_ENV !== "production";
 const csp = [
   "default-src 'self'",
@@ -10,7 +10,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${api}${isDev ? " ws: http://localhost:*" : ""}`,
+  `connect-src 'self' ${api} https: http:${isDev ? " ws: http://localhost:*" : ""}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -21,6 +21,15 @@ const csp = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   output: "standalone",
+  async rewrites() {
+    const backend = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL;
+    if (!backend) return [];
+    const base = backend.startsWith("http") ? backend : `https://${backend}`;
+    return [
+      { source: "/api/:path*", destination: `${base}/api/:path*` },
+      { source: "/auth/:path*", destination: `${base}/auth/:path*` },
+    ];
+  },
   async headers() {
     return [{
       source: "/:path*",

@@ -36,11 +36,7 @@
       ]
     ],
     "extra": {
-      "apiUrl": "https://marshland-giant-engraved.ngrok-free.dev",
-      "adminEmail": "admin@deificdigital.com",
-      "adminPassword": "ChangeMe-Admin-2026",
-      "ownerEmail": "owner@demo-dental.com",
-      "ownerPassword": "ChangeMe-Owner-2026",
+      "apiUrl": "",
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
       }

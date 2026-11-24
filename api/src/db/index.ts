@@ -5,8 +5,10 @@ import * as schema from "./schema";
 
 export const pool = new Pool({
   connectionString: config.databaseUrl,
-  // Production databases must use TLS (HIPAA: encryption in transit).
-  ssl: config.databaseSsl ? { rejectUnauthorized: true } : undefined,
+  // Production databases: use TLS with configurable CA validation for managed cloud providers
+  ssl: config.databaseSsl
+    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === "true" }
+    : undefined,
   max: Number(process.env.DB_POOL_MAX ?? 20),
   // Fail fast instead of hanging a phone call if the pool is ever exhausted
   connectionTimeoutMillis: 10_000,

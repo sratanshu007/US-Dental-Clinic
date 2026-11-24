@@ -3,7 +3,23 @@
 // API client for the clinic dashboard.
 // Tokens live in sessionStorage (cleared when the tab closes) — never localStorage.
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+function getApiUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!envUrl) {
+    if (typeof window !== "undefined") {
+      // In the browser, default to current origin (proxied by Next.js rewrites or same-origin)
+      return "";
+    }
+    return "http://localhost:4000";
+  }
+  const trimmed = envUrl.trim().replace(/\/$/, "");
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
+}
+
+export const API_URL = getApiUrl();
 
 export type Role = "SUPER_ADMIN" | "CLINIC_OWNER" | "CLINIC_STAFF";
 export interface SessionUser {
@@ -101,8 +117,16 @@ export async function api<T = any>(path: string, init: { method?: string; body?:
     if (typeof window !== "undefined") window.location.href = "/login?expired=1";
   }
   const text = await r.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!r.ok) throw new ApiError(r.status, data?.error ?? `Request failed (${r.status})`);
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // Response is not JSON (e.g. HTML 404, 502 Bad Gateway from cloud provider or wrong URL)
+  }
+  if (!r.ok) {
+    const errorMsg = data?.error ?? (r.status === 404 ? `Endpoint not found (${r.status})` : `Request failed (${r.status})`);
+    throw new ApiError(r.status, errorMsg);
+  }
   return data as T;
 }
 
