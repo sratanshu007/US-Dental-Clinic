@@ -12,16 +12,20 @@ export interface ToolCall { id: string; type: "function"; function: { name: stri
 export type LlmEvent = { type: "text"; delta: string } | { type: "done"; toolCalls: ToolCall[]; text: string };
 
 export async function* chatStream(messages: Message[], tools: ToolDef[], signal: AbortSignal): AsyncGenerator<LlmEvent> {
+  const payload = {
+    model: config.llm.model, messages, tools, tool_choice: "auto", stream: true,
+    temperature: config.llm.temperature, max_tokens: config.llm.maxTokens,
+  };
   const r = await fetch(`${config.llm.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.llm.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: config.llm.model, messages, tools, tool_choice: "auto", stream: true,
-      temperature: config.llm.temperature, max_tokens: config.llm.maxTokens,
-    }),
+    body: JSON.stringify(payload),
     signal,
   });
-  if (!r.ok || !r.body) throw new Error(`LLM request failed (${r.status})`);
+  if (!r.ok || !r.body) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`LLM request failed (${r.status} ${r.statusText}): ${errText}`);
+  }
   const reader = r.body.getReader();
   const dec = new TextDecoder();
   let buf = "";

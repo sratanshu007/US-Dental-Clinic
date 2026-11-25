@@ -170,6 +170,8 @@ app.get("/ready", async (_req, res) => {
   const checks = {
     deepgram_key: !!config.deepgram.apiKey,
     llm_key: !!config.llm.apiKey,
+    llm_model: config.llm.model,
+    llm_base_url: config.llm.baseUrl,
     plivo_keys: !!(config.plivo.authId && config.plivo.authToken),
     api: apiCheck.ok,
     api_url: config.apiUrl,

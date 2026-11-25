@@ -220,6 +220,7 @@ export class CallSession {
     const text = this.userBuf.trim();
     if (!text || this.finished || this.transferring || this.endRequested) return;
     this.userBuf = "";
+    log.info("caller turn", { text, callId: this.session?.callId });
     if (this.responding) this.interrupt();
     this.messages.push({ role: "user", content: text });
     this.turnEndedAt = Date.now();
@@ -253,9 +254,9 @@ export class CallSession {
     const run = this.generate(ctrl.signal)
       .catch((e) => {
         if (!ctrl.signal.aborted) {
-          log.error("response failed", { err: (e as Error).message, callId: this.session.callId });
+          log.error("response failed", { err: (e as Error).message, callId: this.session?.callId });
           try {
-            this.queueSpeech("I'm sorry, could you please repeat that? How can I help you with your dental visit today?", ctrl.signal, []);
+            this.queueSpeech("Yes, I'm here. How can I help you with your dental appointment or questions today?", ctrl.signal, []);
           } catch { /* best effort */ }
         }
       })
@@ -325,6 +326,8 @@ export class CallSession {
       if (tail) this.queueSpeech(tail, signal, spoken);
       if (signal.aborted) return;
 
+      const replyText = fullText || spoken.join(" ");
+      if (replyText) log.info("assistant reply", { reply: replyText, callId: this.session?.callId });
       this.messages.push({ role: "assistant", content: fullText || null, ...(calls.length ? { tool_calls: calls } : {}) });
       if (!calls.length) break;
 
