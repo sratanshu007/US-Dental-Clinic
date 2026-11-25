@@ -16,18 +16,16 @@ if (!llmModel) throw new Error("Set OPENAI_MODEL or LLM_MODEL in environment var
 function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   if (!url) return "";
   let trimmed = url.trim().replace(/\/$/, "");
-  // Internal service name or localhost on Render free tier
-  if (trimmed === "dental-api" || trimmed.startsWith("dental-api:") || trimmed === "http://localhost:4000") {
-    return "https://dental-api-7h2u.onrender.com";
+  if (trimmed.startsWith("http://localhost") || trimmed.startsWith("https://localhost") || trimmed.includes("localhost:")) {
+    return trimmed.startsWith("http") ? trimmed : `http://${trimmed}`;
   }
-  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-    if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
-      trimmed = `http://${trimmed}`;
-    } else {
-      trimmed = `${defaultProtocol}${trimmed}`;
-    }
+  let host = trimmed.replace(/^https?:\/\//, "");
+  if (host === "dental-api" || host.startsWith("dental-api:")) {
+    host = "dental-api-7h2u.onrender.com";
+  } else if (!host.includes(".")) {
+    host = `${host}.onrender.com`;
   }
-  return trimmed;
+  return `https://${host}`;
 }
 
 const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "https://dental-voice-pfb7.onrender.com";

@@ -9,17 +9,16 @@ function required(name: string): string {
 function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   if (!url) return "";
   let trimmed = url.trim().replace(/\/$/, "");
-  if (trimmed === "dental-voice" || trimmed.startsWith("dental-voice:") || trimmed === "http://localhost:7860") {
-    return "https://dental-voice-pfb7.onrender.com";
+  if (trimmed.startsWith("http://localhost") || trimmed.startsWith("https://localhost") || trimmed.includes("localhost:")) {
+    return trimmed.startsWith("http") ? trimmed : `http://${trimmed}`;
   }
-  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-    if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
-      trimmed = `http://${trimmed}`;
-    } else {
-      trimmed = `${defaultProtocol}${trimmed}`;
-    }
+  let host = trimmed.replace(/^https?:\/\//, "");
+  if (host === "dental-voice" || host.startsWith("dental-voice:")) {
+    host = "dental-voice-pfb7.onrender.com";
+  } else if (!host.includes(".")) {
+    host = `${host}.onrender.com`;
   }
-  return trimmed;
+  return `https://${host}`;
 }
 
 export const config = {
