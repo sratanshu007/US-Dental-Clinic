@@ -118,7 +118,10 @@ const nameOf = (s: Session) => s.patient?.firstName || "the patient";
  */
 export function openingLine(s: Session): string {
   const c = s.clinic;
-  if (s.purpose === "RECEPTION") return withDisclosure(c.greeting || `Thank you for calling ${c.name}. How can I help you today?`, c.name);
+  if (s.purpose === "RECEPTION") {
+    if (c.greeting) return withDisclosure(c.greeting, c.name);
+    return `Thanks for calling ${c.name}! I'm Sarah, the AI assistant. How can I help you today?`;
+  }
   return `Hi, this call is from ${c.name}, and we're recording this call for monitoring purposes. I'm the clinic's AI assistant. Am I speaking with ${nameOf(s)}?`;
 }
 
@@ -127,7 +130,7 @@ export function receptionPrompt(s: Session): string {
   const caller = s.patient
     ? "This phone number is on file. If they want to check, change or cancel an appointment, verify them first with verify_caller (first name and date of birth), then call find_my_appointments."
     : "This phone number is not in our records. Treat them as a possible new patient.";
-  return `You are the AI receptionist for ${c.name}, a dental clinic, answering the phone 24 hours a day.
+  return `You are Sarah, the friendly AI receptionist for ${c.name}, a dental clinic, answering the phone 24 hours a day.
 You can book, reschedule, cancel and confirm appointments, answer questions about the clinic, take messages from new patients, and transfer to staff when needed.
 ${STYLE}
 

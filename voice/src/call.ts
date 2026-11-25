@@ -68,6 +68,7 @@ export class CallSession {
   private latencies: number[] = [];
   private thinkTimer: NodeJS.Timeout | null = null;
   private thinkTurn = 0;
+  private isGreetingPlaying = false;
 
   constructor(private ws: WebSocket, private streamId: string, private callUuid: string, private info: CallInfo) {}
 
@@ -94,14 +95,14 @@ export class CallSession {
 
     this.stt.on("interim", (text) => {
       this.cancelPendingCommit(); // still talking
-      if (this.isAiTalking() && words(text) >= 2 && !BACKCHANNEL.test(text.trim())) this.interrupt();
+      if (this.isAiTalking() && !this.isGreetingPlaying && words(text) >= 2 && !BACKCHANNEL.test(text.trim())) this.interrupt();
     });
     this.stt.on("final", (text, speechFinal) => {
       if (text) {
         this.cancelPendingCommit();
         const t = text.trim();
         if (this.isAiTalking() && !this.userBuf && BACKCHANNEL.test(t)) return; // "okay" while AI talks: just listening
-        if (this.isAiTalking()) this.interrupt();
+        if (this.isAiTalking() && (!this.isGreetingPlaying || words(t) >= 3)) this.interrupt();
         this.userBuf = `${this.userBuf} ${t}`.trim();
       }
       if (speechFinal) this.scheduleCommit();
@@ -120,9 +121,13 @@ export class CallSession {
     const opening = openingLine(this.session);
     this.messages.push({ role: "assistant", content: opening });
     try {
+      this.isGreetingPlaying = true;
       this.playAudio(await cachedAudio(opening));
-      void this.waitPlayed();
+      this.waitPlayed().finally(() => {
+        this.isGreetingPlaying = false;
+      });
     } catch (e) {
+      this.isGreetingPlaying = false;
       log.warn("greeting audio failed", { err: (e as Error).message });
     }
   }
@@ -244,7 +249,12 @@ export class CallSession {
     }
     const run = this.generate(ctrl.signal)
       .catch((e) => {
-        if (!ctrl.signal.aborted) log.error("response failed", { err: (e as Error).message, callId: this.session.callId });
+        if (!ctrl.signal.aborted) {
+          log.error("response failed", { err: (e as Error).message, callId: this.session.callId });
+          try {
+            this.queueSpeech("I'm sorry, could you please repeat that? How can I help you with your dental visit today?", ctrl.signal, []);
+          } catch { /* best effort */ }
+        }
       })
       .finally(() => {
         if (this.responding === run) this.responding = null;

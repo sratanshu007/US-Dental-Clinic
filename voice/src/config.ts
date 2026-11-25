@@ -31,6 +31,13 @@ function normalizeUrl(url: string, defaultProtocol = "https://"): string {
 const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "https://dental-voice-pfb7.onrender.com";
 const rawApiUrl = env("API_URL") || env("BACKEND_API_URL") || "https://dental-api-7h2u.onrender.com";
 
+const llmApiKey = env("OPENAI_API_KEY") || env("XAI_API_KEY");
+let llmBaseUrl = (env("OPENAI_BASE_URL") || LLM_BASES[llmProvider] || LLM_BASES.openai).replace(/\/$/, "");
+// Auto-correct: If someone passed an OpenAI key (sk-...) but baseUrl was set to Groq, route to OpenAI
+if (llmApiKey?.startsWith("sk-") && llmBaseUrl.includes("api.groq.com")) {
+  llmBaseUrl = "https://api.openai.com/v1";
+}
+
 export const config = {
   env: env("NODE_ENV", "development"),
   port: Number(env("PORT", "7860")),
@@ -48,8 +55,8 @@ export const config = {
 
   llm: {
     provider: llmProvider,
-    apiKey: env("OPENAI_API_KEY") || env("XAI_API_KEY"),
-    baseUrl: (env("OPENAI_BASE_URL") || LLM_BASES[llmProvider] || LLM_BASES.openai).replace(/\/$/, ""),
+    apiKey: llmApiKey,
+    baseUrl: llmBaseUrl,
     model: llmModel,
     summaryModel: env("SUMMARY_MODEL", llmModel),
     temperature: Number(env("LLM_TEMPERATURE", "0.6")),
@@ -69,7 +76,7 @@ export const config = {
     // Extra wait when the caller seems mid-sentence ("my name is...", "um", "and")
     incompleteWaitMs: Number(env("INCOMPLETE_WAIT_MS", "700")),
     // If no reply audio has started this long after the caller stopped, say a quick "Mm-hmm." (0 = off)
-    thinkingAckMs: Number(env("THINKING_ACK_MS", "900")),
+    thinkingAckMs: Number(env("THINKING_ACK_MS", "0")),
   },
 
   maxCallSeconds: Number(env("MAX_CALL_SECONDS", "900")),
