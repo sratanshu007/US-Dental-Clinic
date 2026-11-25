@@ -54,7 +54,9 @@ export class DeepgramStt extends EventEmitter<SttEvents> {
         else this.emit("interim", text);
       }
     });
-    ws.on("error", (e) => this.emit("error", e as Error));
+    ws.on("error", (e) => {
+      if (!this.closed) this.emit("error", e as Error);
+    });
     ws.on("close", () => {
       if (this.keepAlive) clearInterval(this.keepAlive);
       if (!this.closed) this.emit("error", new Error("Deepgram STT closed"));
@@ -70,6 +72,7 @@ export class DeepgramStt extends EventEmitter<SttEvents> {
     this.closed = true;
     if (this.keepAlive) clearInterval(this.keepAlive);
     try {
+      this.ws?.removeAllListeners("error");
       if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "CloseStream" }));
       this.ws?.close();
     } catch { /* ignore */ }

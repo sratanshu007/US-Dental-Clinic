@@ -256,6 +256,12 @@ if (require.main === module) {
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
+  process.on("unhandledRejection", (err) => {
+    log.error("unhandledRejection", { err: (err as Error)?.message ?? String(err) });
+  });
+  process.on("uncaughtException", (err) => {
+    log.error("uncaughtException", { err: err?.message, stack: err?.stack });
+  });
 }
 
 export { app, server, PENDING };

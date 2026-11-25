@@ -75,6 +75,9 @@ export class CallSession {
   async start(): Promise<void> {
     // Open speech sockets right away, in parallel with fetching the session
     this.stt.connect();
+    this.stt.on("error", (e) => {
+      if (!this.finished) log.warn("stt error", { err: e.message, callId: this.session?.callId });
+    });
     this.tts.connect();
     this.tts.on("audio", (chunk) => this.playAudio(chunk));
     this.tts.on("error", (e) => log.warn("tts stream unavailable, using HTTPS", { err: e.message }));
@@ -85,9 +88,9 @@ export class CallSession {
       this.session = await (this.info.session ?? api.startCall(this.info.direction, this.info.from, this.info.to, this.callUuid, this.info.taskId));
     } catch (e) {
       log.error("could not start call session", { err: (e as Error).message });
-      this.stt.close();
-      this.tts.close();
-      this.ws.close();
+      try { this.stt.close(); } catch {}
+      try { this.tts.close(); } catch {}
+      try { this.ws.close(); } catch {}
       return;
     }
     log.info("call started", { callId: this.session.callId, purpose: this.session.purpose, direction: this.info.direction });
