@@ -8,10 +8,6 @@ function req(name: string): string {
 }
 const env = (name: string, fallback = "") => process.env[name] ?? fallback;
 
-const LLM_BASES: Record<string, string> = { openai: "https://api.openai.com/v1", xai: "https://api.x.ai/v1" };
-const llmProvider = env("LLM_PROVIDER", "openai").toLowerCase();
-let llmModel = env("OPENAI_MODEL", env("LLM_MODEL", llmProvider === "openai" ? "gpt-4o-mini" : ""));
-
 function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   if (!url) return "";
   let trimmed = url.trim().replace(/\/$/, "");
@@ -30,30 +26,11 @@ function normalizeUrl(url: string, defaultProtocol = "https://"): string {
 const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "https://dental-voice-pfb7.onrender.com";
 const rawApiUrl = env("API_URL") || env("BACKEND_API_URL") || "https://dental-api-7h2u.onrender.com";
 
-const llmApiKey = env("OPENAI_API_KEY") || env("XAI_API_KEY");
-let llmBaseUrl = (env("OPENAI_BASE_URL") || LLM_BASES[llmProvider] || LLM_BASES.openai).replace(/\/$/, "");
-
-// Auto-correct model and base URL for OpenAI vs Groq to prevent 404/401 errors
-if (llmApiKey?.startsWith("sk-") || llmBaseUrl.includes("api.openai.com")) {
-  llmBaseUrl = "https://api.openai.com/v1";
-  if (!llmModel || llmModel.includes("llama") || llmModel.includes("groq") || llmModel.includes("mixtral") || llmModel.includes("qwen")) {
-    llmModel = "gpt-4o-mini";
-  }
-} else if (llmApiKey?.startsWith("gsk_") || llmBaseUrl.includes("api.groq.com")) {
-  llmBaseUrl = "https://api.groq.com/openai/v1";
-  if (!llmModel || llmModel.startsWith("gpt-") || llmModel.startsWith("o1") || llmModel.startsWith("o3")) {
-    llmModel = "llama-3.3-70b-versatile";
-  }
-}
-
-if (!llmModel) llmModel = "gpt-4o-mini";
-
-let summaryModel = env("SUMMARY_MODEL", llmModel);
-if (llmBaseUrl.includes("api.openai.com") && (summaryModel.includes("llama") || summaryModel.includes("groq"))) {
-  summaryModel = "gpt-4o-mini";
-} else if (llmBaseUrl.includes("api.groq.com") && (summaryModel.startsWith("gpt-") || summaryModel.startsWith("o1"))) {
-  summaryModel = "llama-3.3-70b-versatile";
-}
+// Strictly pinned to OpenAI gpt-4o-mini - no fallback models or alternate providers
+const llmApiKey = env("OPENAI_API_KEY");
+const llmBaseUrl = "https://api.openai.com/v1";
+const llmModel = "gpt-4o-mini";
+const summaryModel = "gpt-4o-mini";
 
 export const config = {
   env: env("NODE_ENV", "development"),
@@ -71,7 +48,7 @@ export const config = {
   },
 
   llm: {
-    provider: llmProvider,
+    provider: "openai",
     apiKey: llmApiKey,
     baseUrl: llmBaseUrl,
     model: llmModel,
