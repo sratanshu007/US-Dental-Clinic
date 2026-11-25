@@ -70,7 +70,11 @@ export const THINKING = ["Mm-hmm.", "Okay.", "Sure.", "Alright."];
 /** Warm the cache at start-up so the first caller of the day doesn't wait either. */
 export function warmFillers(): void {
   if (!config.deepgram.apiKey) return;
-  const all = new Set([...Object.values(FILLERS).flat(), ...THINKING]);
+  const all = new Set([
+    ...Object.values(FILLERS).flat(),
+    ...THINKING,
+    "Thank you for calling Demo Family Dental! This call's recorded for monitoring purposes, and I'm the clinic's AI assistant. How can I help you today?",
+  ]);
   for (const t of all) cachedAudio(t).catch(() => {});
 }
 
