@@ -68,6 +68,16 @@ internalRouter.post("/calls/start", ah(async (req, res) => {
       const extra = await db.query.clinicNumbers.findFirst({ where: eq(schema.clinicNumbers.number, to) });
       if (extra) clinic = await db.query.clinics.findFirst({ where: eq(schema.clinics.id, extra.clinicId) });
     }
+    // Fallback: If no clinic matches this specific number, but only one active clinic exists, use it
+    if (!clinic) {
+      const activeClinics = await db.query.clinics.findMany({
+        where: eq(schema.clinics.active, true),
+        limit: 2,
+      });
+      if (activeClinics.length === 1) {
+        clinic = activeClinics[0];
+      }
+    }
     if (!clinic || !clinic.active || !clinic.aiEnabled || !billingAllowsService(clinic)) throw notFound("No active clinic for this number");
     clinicId = clinic.id;
     const from = normalizeUsPhone(b.from);

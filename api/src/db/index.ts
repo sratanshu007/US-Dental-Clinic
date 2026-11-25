@@ -1,6 +1,9 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
+import path from "node:path";
+import fs from "node:fs";
 import { config } from "../config";
 import * as schema from "./schema";
 
@@ -21,6 +24,25 @@ export { schema };
 
 // Auto-align new schema columns on database connect
 async function runAutoMigrations() {
+  try {
+    const possibleDirs = [
+      path.resolve(__dirname, "../../drizzle"),
+      path.resolve(__dirname, "../drizzle"),
+      path.resolve(process.cwd(), "drizzle"),
+      path.resolve(process.cwd(), "api/drizzle"),
+    ];
+    const drizzleDir = possibleDirs.find((d) => fs.existsSync(d) && (fs.existsSync(path.join(d, "meta")) || fs.existsSync(path.join(d, "0000_init.sql"))));
+    if (drizzleDir) {
+      console.log(`[db:migrate] Running drizzle migrations from ${drizzleDir}...`);
+      await migrate(db, { migrationsFolder: drizzleDir });
+      console.log("[db:migrate] Drizzle migrations applied successfully.");
+    } else {
+      console.warn("[db:migrate] No drizzle migrations directory found.");
+    }
+  } catch (err: any) {
+    console.error("[db:migrate] Error during drizzle migrations:", err.message);
+  }
+
   try {
     await pool.query(`
       DO $$ BEGIN

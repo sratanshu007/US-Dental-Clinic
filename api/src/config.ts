@@ -6,6 +6,19 @@ function required(name: string): string {
   return v;
 }
 
+function normalizeUrl(url: string, defaultProtocol = "https://"): string {
+  if (!url) return "";
+  let trimmed = url.trim().replace(/\/$/, "");
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
+      trimmed = `http://${trimmed}`;
+    } else {
+      trimmed = `${defaultProtocol}${trimmed}`;
+    }
+  }
+  return trimmed;
+}
+
 export const config = {
   env: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 4000),
@@ -23,11 +36,11 @@ export const config = {
   maxFailedLogins: Number(process.env.MAX_FAILED_LOGINS ?? 5),
   lockoutMinutes: Number(process.env.LOCKOUT_MINUTES ?? 15),
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",").map((s) => s.trim()),
-  publicApiUrl: process.env.PUBLIC_API_URL ?? "http://localhost:4000",
+  publicApiUrl: normalizeUrl(process.env.PUBLIC_API_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:4000"),
   // Public base URL for secure patient links in texts, e.g. https://dd-care.com (proxied to this API).
   // Use your own short domain — carriers often block public link shorteners.
-  patientLinkBase: (process.env.PATIENT_LINK_BASE ?? process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, ""),
-  voiceAgentUrl: process.env.VOICE_AGENT_URL ?? "http://localhost:7860",
+  patientLinkBase: normalizeUrl(process.env.PATIENT_LINK_BASE ?? process.env.PUBLIC_API_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:4000"),
+  voiceAgentUrl: normalizeUrl(process.env.VOICE_AGENT_URL ?? "http://localhost:7860"),
   plivo: {
     authId: process.env.PLIVO_AUTH_ID ?? "",
     authToken: process.env.PLIVO_AUTH_TOKEN ?? "",

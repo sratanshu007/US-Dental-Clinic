@@ -13,12 +13,28 @@ const llmProvider = env("LLM_PROVIDER", "openai").toLowerCase();
 const llmModel = env("OPENAI_MODEL", env("LLM_MODEL", llmProvider === "openai" ? "gpt-4o-mini" : ""));
 if (!llmModel) throw new Error("Set OPENAI_MODEL or LLM_MODEL in environment variables for your LLM provider");
 
+function normalizeUrl(url: string, defaultProtocol = "https://"): string {
+  if (!url) return "";
+  let trimmed = url.trim().replace(/\/$/, "");
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
+      trimmed = `http://${trimmed}`;
+    } else {
+      trimmed = `${defaultProtocol}${trimmed}`;
+    }
+  }
+  return trimmed;
+}
+
+const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "http://localhost:7860";
+const rawApiUrl = env("API_URL", "http://localhost:4000");
+
 export const config = {
   env: env("NODE_ENV", "development"),
   port: Number(env("PORT", "7860")),
   // Public HTTPS URL of THIS service (Plivo calls it), e.g. https://voice.yourdomain.com
-  publicUrl: env("PUBLIC_URL", "http://localhost:7860").replace(/\/$/, ""),
-  apiUrl: env("API_URL", "http://localhost:4000").replace(/\/$/, ""),
+  publicUrl: normalizeUrl(rawPublicUrl),
+  apiUrl: normalizeUrl(rawApiUrl),
   internalApiKey: req("INTERNAL_API_KEY"),
 
   plivo: {
