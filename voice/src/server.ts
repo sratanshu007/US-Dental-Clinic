@@ -166,13 +166,16 @@ app.get("/", (_req, res) => {
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/ready", async (_req, res) => {
+  const apiCheck = await api.apiReady();
   const checks = {
     deepgram_key: !!config.deepgram.apiKey,
     llm_key: !!config.llm.apiKey,
     plivo_keys: !!(config.plivo.authId && config.plivo.authToken),
-    api: await api.apiReady(),
+    api: apiCheck.ok,
+    api_url: config.apiUrl,
+    ...(apiCheck.error ? { api_error: apiCheck.error } : {}),
   };
-  const ok = Object.values(checks).every(Boolean);
+  const ok = checks.deepgram_key && checks.llm_key && checks.plivo_keys && checks.api;
   res.status(ok ? 200 : 503).json({ ok, activeCalls: ACTIVE.size, ...checks });
 });
 

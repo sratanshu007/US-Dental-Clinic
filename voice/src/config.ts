@@ -16,6 +16,10 @@ if (!llmModel) throw new Error("Set OPENAI_MODEL or LLM_MODEL in environment var
 function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   if (!url) return "";
   let trimmed = url.trim().replace(/\/$/, "");
+  // Internal service name or localhost on Render free tier
+  if (trimmed === "dental-api" || trimmed.startsWith("dental-api:") || trimmed === "http://localhost:4000") {
+    return "https://dental-api-7h2u.onrender.com";
+  }
   if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
     if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
       trimmed = `http://${trimmed}`;
@@ -26,8 +30,8 @@ function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   return trimmed;
 }
 
-const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "http://localhost:7860";
-const rawApiUrl = env("API_URL", "http://localhost:4000");
+const rawPublicUrl = env("PUBLIC_URL") || env("RENDER_EXTERNAL_URL") || "https://dental-voice-pfb7.onrender.com";
+const rawApiUrl = env("API_URL") || env("BACKEND_API_URL") || "https://dental-api-7h2u.onrender.com";
 
 export const config = {
   env: env("NODE_ENV", "development"),

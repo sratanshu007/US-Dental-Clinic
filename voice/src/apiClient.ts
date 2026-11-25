@@ -50,16 +50,18 @@ export async function taskResult(taskId: string, status: string, error: string |
   try { await post(`/tasks/${encodeURIComponent(taskId)}/result`, { status, error }); } catch { /* best effort */ }
 }
 
-export async function apiReady(): Promise<boolean> {
+export async function apiReady(): Promise<{ ok: boolean; error?: string }> {
   try {
     const r = await fetch(`${config.apiUrl}/health`, { signal: AbortSignal.timeout(5000) });
-    return r.ok;
-  } catch {
+    if (r.ok) return { ok: true };
+    return { ok: false, error: `HTTP ${r.status}` };
+  } catch (e: any) {
     try {
       const r2 = await fetch(`${config.apiUrl}/ready`, { signal: AbortSignal.timeout(5000) });
-      return r2.ok;
-    } catch {
-      return false;
+      if (r2.ok) return { ok: true };
+      return { ok: false, error: `HTTP ${r2.status}` };
+    } catch (e2: any) {
+      return { ok: false, error: e?.message || "Failed to reach API" };
     }
   }
 }

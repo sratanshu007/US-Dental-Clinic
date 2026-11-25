@@ -9,6 +9,9 @@ function required(name: string): string {
 function normalizeUrl(url: string, defaultProtocol = "https://"): string {
   if (!url) return "";
   let trimmed = url.trim().replace(/\/$/, "");
+  if (trimmed === "dental-voice" || trimmed.startsWith("dental-voice:") || trimmed === "http://localhost:7860") {
+    return "https://dental-voice-pfb7.onrender.com";
+  }
   if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
     if (trimmed.startsWith("localhost") || trimmed.includes("localhost:")) {
       trimmed = `http://${trimmed}`;
